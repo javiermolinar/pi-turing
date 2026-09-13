@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAbsolute } from "node:path";
+import { extractionSchema, readingRequirementSchema } from "./evidence.ts";
 import { searchProviderSchema } from "./search.ts";
 import { discoveryBatchSchema, scholarlyProviderSchema } from "./discovery-types.ts";
 
@@ -14,6 +15,7 @@ export const thinkingSchema = z.enum(["off", "minimal", "low", "medium", "high",
 export const configSchema = z.object({
   searchProvider: searchProviderSchema.default("brave"),
   scholarlyProviders: z.array(scholarlyProviderSchema).max(7).default(["openalex", "crossref"]),
+  readingRequirements: z.array(readingRequirementSchema).max(4).default([]),
   fullTextResolvers: z.array(z.enum(["unpaywall", "europepmc", "core"])).max(3).default([]),
   concurrency: z.number().int().min(1).max(4).default(2),
   sourceTarget: z.number().int().min(10).max(30).default(15),
@@ -42,6 +44,7 @@ export type Check = z.infer<typeof checkSchema>;
 export const sourceSchema = z.object({
   id: z.string(), title: z.string(), url: z.string(), words: z.number(),
   retrievedAt: z.string().optional(), contentHash: z.string().optional(), fullRead: z.boolean().default(false),
+  extraction: extractionSchema.optional(),
   oa: z.unknown().optional(),
   resolverCoverage: z.array(z.object({ resolver: z.enum(["unpaywall", "europepmc", "core"]), available: z.boolean(), reason: z.string().nullable() })).max(3).optional(),
 });

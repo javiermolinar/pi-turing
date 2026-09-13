@@ -59,6 +59,78 @@ def require_url(url: str):
         raise ValueError("Only HTTP(S) URLs without embedded credentials are allowed")
 
 
+def extraction_diagnostics(root, meta, body, offset, end):
+    """Inspect preserved bytes; never call a network, browser, OCR, or login tool.
+
+    Complete pagination covers extracted TEXT, not the visual document. Preserve
+    actual PDF page numbers, including empty pages upstream's reader dropped.
+    """
+    oa = meta.get("oa") or {}
+    actual_url = oa.get("url") or oa.get("oa_url") or meta["source"]
+    version = {"submittedVersion": "submitted", "acceptedVersion": "accepted", "publishedVersion": "published"}.get(oa.get("version"), "unknown")
+    result = {"reader": "python-static-text", "media": "html", "status": "text-extracted", "actualUrl": actual_url,
+              "version": version, "missingPages": [], "warnings": ["layout-unverified", "tables-unverified", "figures-unverified", "equations-unverified"]}
+    raw = meta.get("raw_file")
+    path = None
+    if raw:
+        relative = Path(raw)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("Unsafe source asset path")
+        path = root / "research"
+        for part in relative.parts:
+            path = path / part
+            if path.is_symlink():
+                raise ValueError("Symlink source asset refused")
+    is_pdf = urlparse(actual_url).path.lower().endswith(".pdf") or bool(path and path.suffix.lower() == ".pdf")
+    if path and path.exists():
+        if not path.is_file() or path.stat().st_size > 20_000_000:
+            return {**result, "status": "incomplete", "warnings": ["Source asset exceeds diagnostic limit"]}, []
+        data = path.read_bytes()
+        result["rawHash"] = hashlib.sha256(data).hexdigest()
+        is_pdf = is_pdf or data.startswith(b"%PDF-")
+    else:
+        data = None
+    if not is_pdf:
+        return result, []
+    result.update(reader="pymupdf-text-layer", media="pdf")
+    if data is None:
+        return {**result, "status": "unknown", "warnings": [*result["warnings"], "Preserved PDF bytes unavailable; page completeness unknown"]}, []
+    import pymupdf
+    spans = []
+    try:
+        with pymupdf.open(stream=data, filetype="pdf") as doc:
+            result["pages"] = len(doc)
+            if len(doc) > 300 or doc.needs_pass:
+                return {**result, "status": "incomplete", "warnings": ["Encrypted PDF or diagnostic page limit exceeded"]}, []
+            cursor = 0
+            missing = []
+            for index, page in enumerate(doc):
+                text = page.get_text("text").strip()
+                if len(text) < 40:
+                    missing.append(index + 1)
+                    continue
+                start = body.find(text, cursor)
+                if start < 0:
+                    result["status"] = "incomplete"
+                    continue
+                cursor = start + len(text)
+                if start < end and cursor > offset:
+                    spans.append({"page": index + 1, "start": start, "end": cursor})
+            result["textPages"] = len(doc) - len(missing)
+            result["missingPages"] = missing[:20]
+            if missing:
+                result["status"] = "incomplete"
+                result["warnings"].append("Empty/sparse pages require approved OCR or visual review; none was performed")
+            if result["status"] == "incomplete":
+                result["warnings"].append("Some PDF pages cannot be mapped to usable preserved source text")
+    except Exception:
+        result["status"] = "unavailable"
+        result["warnings"].append("PDF diagnostic reader failed; no visual/OCR fallback was invoked")
+    if len(spans) > 20:
+        result["warnings"].append("Page provenance for this response is truncated to 20 spans")
+    return result, spans[:20]
+
+
 def resolver_coverage(resolvers):
     if not isinstance(resolvers, list) or any(value not in ("unpaywall", "europepmc", "core") for value in resolvers):
         raise ValueError("Invalid approved resolver list")
@@ -173,8 +245,10 @@ def dispatch(action: str, args: dict):
             fetched = vault.db.execute("SELECT fetched_at FROM sources WHERE note_id = ? LIMIT 1", (note_id,)).fetchone()
             if args["tag"] not in meta.get("tags", []):
                 cli(["note", "update", "--add-tag", args["tag"], "--json", "--", note_id])
+            extraction, pages = extraction_diagnostics(root, meta, body, offset, end)
             return {
                 "id": note_id, "title": meta["title"][:1000], "url": meta["source"],
+                "extraction": extraction, "pageSpans": pages,
                 "words": meta["word_count"], "oa": meta.get("oa"),
                 "retrievedAt": fetched["fetched_at"] if fetched else meta["created"],
                 "offset": offset, "end": end, "total": len(body),

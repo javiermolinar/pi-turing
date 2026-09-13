@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { Type } from "typebox";
 import type { Backend } from "./backend.ts";
+import { adequateExtraction, pageSpanSchema } from "./evidence.ts";
 import { ReadCoverage } from "./coverage.ts";
 import { queueFeedback } from "./feedback.ts";
 import { applyPatch, citationIds } from "./patch.ts";
@@ -18,6 +19,7 @@ import {
 const sourcePageSchema = sourceSchema.omit({ fullRead: true }).extend({
   offset: z.number().int(), end: z.number().int(), total: z.number().int(), hash: z.string(),
   body: z.string(), nextOffset: z.number().int().nullable(),
+  pageSpans: z.array(pageSpanSchema).max(20).optional(),
 });
 class Blocked extends Error {}
 
@@ -107,6 +109,7 @@ export class ResearchRunner {
     this.lastTick = Date.now();
     try {
       this.state.config = configSchema.parse(this.state.config);
+      for (const source of this.state.sources) if (!adequateExtraction(source.extraction, this.state.config.readingRequirements)) source.fullRead = false;
       this.state.pricingKnown = await this.driver.checkModels(this.state);
       if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached. Raise budgetUsd in .pi/hyperresearch.json, then explicitly resume with --use-project-config.");
       for (const worker of this.state.workers) if (worker.status === "running") { worker.status = "interrupted"; worker.endedAt = now(); }
@@ -202,7 +205,7 @@ export class ResearchRunner {
       const page = sourcePageSchema.parse(await this.backend.call("read_source", { tag: this.state.tag, id, offset }, signal));
       const fullyRead = coverage.add(id, page.hash, page.offset, page.end, page.total);
       const existing = this.state.sources.find(s => s.id === id);
-      const source = sourceSchema.parse({ ...page, contentHash: page.hash, fullRead: fullyRead || (existing?.contentHash === page.hash && existing.fullRead) || false });
+      const source = sourceSchema.parse({ ...page, contentHash: page.hash, fullRead: adequateExtraction(page.extraction, this.state.config.readingRequirements) && (fullyRead || (existing?.contentHash === page.hash && existing.fullRead) || false) });
       if (existing) Object.assign(existing, source); else this.state.sources.push(source);
       this.save(); return page;
     };
@@ -293,12 +296,13 @@ export class ResearchRunner {
         const ids = citationIds(draft.markdown);
         if (this.state.sources.filter(s => coverage.complete(s.id)).length < this.state.sourceMin) throw new Error(`Read at least ${this.state.sourceMin} complete sources before drafting`);
         if (ids.length < Math.min(5, this.state.sourceMin)) throw new Error("Cite at least five distinct source notes using [[note-id]]");
-        for (const id of ids) if (!coverage.complete(id)) throw new Error(`Cited source not fully read in this drafting session: ${id}`);
+        for (const id of ids) if (!coverage.complete(id) || !this.state.sources.some(source => source.id === id && source.fullRead)) throw new Error(`Cited source not fully read or inadequately extracted in this drafting session: ${id}`);
       };
       const result = draftSchema.parse(await this.work("draft", "Write the single light-mode draft", `Write one evidence-grounded report.\n` +
         `Required section headings: ${JSON.stringify(decomp.required_section_headings)}. Target ${this.state.wordTarget[0]}–${this.state.wordTarget[1]} words.\n` +
         `Available sources: ${JSON.stringify(this.state.sources)}.\nResearch leads (not substitutes for reading): ${JSON.stringify(this.state.research)}.\n` +
         `Read at least ${this.state.sourceMin} source notes in full with read_source, including EVERY source you cite. ` +
+        `Required reading capabilities: ${JSON.stringify(this.state.config.readingRequirements)}. Inspect extraction diagnostics and actual acquired versions. Text pagination is not proof of layout, table, figure, or equation comprehension. ` +
         "Use [[note-id]] citations adjacent to factual claims. Include a Sources section mapping those ids to URLs. " +
         "Use quotation marks only for exact source text. Distinguish evidence from inference and disclose uncertainty and source limitations. " +
         "Do not include YAML, internal scaffolding, the user prompt, or claims that adversarial/citation audits ran. Submit {markdown}.", draftSchema, this.tools(coverage), validate));

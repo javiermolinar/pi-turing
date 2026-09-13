@@ -81,6 +81,21 @@ test("scholarly batches and coverage persist without counting discovery metadata
   } finally { env.cleanup(); }
 });
 
+test("incomplete extraction cannot satisfy the width gate, even with complete pagination", async () => {
+  const env = await setup();
+  try {
+    const call = env.backend.call.bind(env.backend);
+    env.backend.call = async <T>(action: BackendAction, args: Record<string, unknown> = {}): Promise<T> => {
+      const value = await call<Record<string, unknown>>(action, args);
+      return (action === "read_source" ? { ...value, extraction: { reader: "fixture", media: "pdf", status: "incomplete", actualUrl: "https://example.org/paper.pdf", version: "unknown", pages: 2, textPages: 1, missingPages: [2], warnings: ["Scanned page not read"] } } : value) as T;
+    };
+    await env.runner.run();
+    assert.equal(env.runner.state.status, "blocked"); assert.equal(env.driver.roles.includes("draft"), false);
+    assert.ok(env.runner.state.sources.every(source => !source.fullRead));
+    assert.equal(env.runner.store.load().sources[0].extraction?.missingPages[0], 2);
+  } finally { env.cleanup(); }
+});
+
 test("light pipeline orders stages, requires source reads, patches and verifies", async () => {
   const env = await setup();
   try {

@@ -595,10 +595,12 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ### M3a — Reading and local files
 
-- [ ] Record extraction diagnostics and version/page/section provenance where
-      readers support it; make incomplete or inaccessible evidence explicit.
-- [ ] Add representative PDF fixtures for scans, columns, tables, equations, and
-      missing text; compose OCR/visual/browser readers only where justified.
+- [x] Record extraction diagnostics, acquired versions, preserved-byte hashes and
+      physical PDF page spans; incomplete or inaccessible evidence is explicit.
+      Text-only readers cannot clear configured visual-reading requirements.
+- [x] Add representative PDF fixtures for scans, columns, tables, equations, and
+      missing text. No OCR/visual/browser adapter is currently approved or invoked;
+      absence remains a visible capability gap, not a successful visual read.
 - [ ] Add user-controlled access escalation without login/CAPTCHA/2FA automation.
 - [ ] Add local-file selection/preview, purpose labels, limits, secret exclusions,
       path protection, immutable run snapshots, and locally citable source records.

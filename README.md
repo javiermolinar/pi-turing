@@ -88,8 +88,13 @@ your research query are sent to the selected models.
 
 A run normally needs at least 10 complete source reads and targets 15 sources.
 Static/PDF fetch failures remain visible; browser-dependent pages cannot yet be
-retrieved through this port. The backend retains open-access recovery and its
-version/provenance disclosures.
+retrieved through this port. Approved backend resolvers retain open-access recovery and acquired-version
+provenance. PDF diagnostics inspect preserved bytes, hash assets, retain physical
+page numbers, and reject scans, sparse/missing pages, or failed text mapping as
+complete reads. Text extraction does not verify columns, tables, figures, or math.
+Set `readingRequirements` to any of `layout`, `tables`, `figures`, `equations` to
+require those capabilities; the current text-only reader cannot clear them. No
+OCR, visual model, login, CAPTCHA, or browser fallback runs automatically.
 
 ## Commands
 

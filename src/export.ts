@@ -97,7 +97,7 @@ export function portableMarkdown(state: RunState): string {
   const sourceList = state.sources.map((source, index) => {
     const url = publicUrl(source.url);
     if (!url) return `- [${index + 1}] Local/nonportable evidence — not included.`;
-    return `- [${index + 1}] ${link(mdText(source.title), url)}. Retrieved: ${mdText(source.retrievedAt ?? "unknown")}. ${source.fullRead ? "Full-read coverage recorded" : "Not fully read"}.${source.contentHash ? ` Content hash: ${mdText(source.contentHash)}.` : ""}${source.oa ? " Open-access substitution recorded; consult preserved evidence for the acquired version." : ""}`;
+    return `- [${index + 1}] ${link(mdText(source.title), url)}. Retrieved: ${mdText(source.retrievedAt ?? "unknown")}. ${source.fullRead ? "Full-read coverage recorded" : "Not fully read"}.${source.contentHash ? ` Content hash: ${mdText(source.contentHash)}.` : ""}${source.oa ? " Open-access substitution recorded; consult preserved evidence for the acquired version." : ""}${source.extraction ? ` Extraction: ${mdText(source.extraction.status)}; version ${mdText(source.extraction.version)}. ${mdText(source.extraction.warnings.join("; "))}.` : ""}`;
   }).join("\n");
   return `${header}${report}\n\n## Recorded sources\n\n${sourceList || "No sources recorded."}\n`;
 }

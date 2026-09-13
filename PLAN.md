@@ -640,6 +640,10 @@ absent. Keep regression coverage for the working light pipeline throughout.
       findings, and conservative content/URL/DOI/near-copy relationship signals.
       Async result validation is awaited before accepting worker output. These
       helpers are not yet scheduled research stages or a semantic parity result.
+- [x] Implement the composable bounded audit/correction loop with a versioned
+      journal, complete reassessment after patches, original finding retention,
+      saved-proof revalidation, and checkpoint/pause/budget fixtures. Its host must
+      atomically save report, costs and journal; production runner wiring remains.
 - [ ] Add contradiction mapping, bounded depth tasks, reconciliation, and a
       structured evidence digest with traceable claims and exact passages.
 - [ ] Add corpus critique, targeted gap retrieval, and source-independence analysis.

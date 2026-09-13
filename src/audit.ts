@@ -14,12 +14,22 @@ export const digestHash = (text: string) => createHash("sha256").update(text).di
 
 /** Exact passage checks use raw preserved text, never wrapper instructions or a
  * model's assertion that a quote was checked. Semantic support is a separate judgment. */
-export async function verifyPassages(passages: Passage[], state: RunState, backend: Backend, coverage: ReadCoverage, signal: AbortSignal): Promise<VerifiedPassage[]> {
+export function verifyPassages(passages: Passage[], state: RunState, backend: Backend, coverage: ReadCoverage, signal: AbortSignal): Promise<VerifiedPassage[]> {
+  return checkPassages(passages, state, backend, coverage, signal);
+}
+/** Recheck saved proofs without claiming a new model read. Never use this to
+ * mint support judgments for text the auditing worker has not read. */
+export async function revalidatePassages(proofs: VerifiedPassage[], state: RunState, backend: Backend, signal: AbortSignal): Promise<void> {
+  for (const proof of proofs) if (state.sources.find(source => source.id === proof.sourceId)?.contentHash !== proof.sourceHash) throw new Error("Saved evidence proof is stale");
+  const checked = await checkPassages(proofs.map(({ sourceId, quote }) => ({ sourceId, quote })), state, backend, undefined, signal);
+  if (JSON.stringify(checked) !== JSON.stringify(proofs.map(proof => verifiedPassageSchema.parse(proof)))) throw new Error("Saved evidence proof changed");
+}
+async function checkPassages(passages: Passage[], state: RunState, backend: Backend, coverage: ReadCoverage | undefined, signal: AbortSignal): Promise<VerifiedPassage[]> {
   const results: VerifiedPassage[] = [];
   for (const raw of passages) {
     signal.throwIfAborted(); const passage = passageSchema.parse(raw);
     const source = state.sources.find(item => item.id === passage.sourceId);
-    if (!source?.fullRead || source.purpose === "background" || !adequateExtraction(source.extraction, state.config.readingRequirements) || !source.contentHash || !coverage.complete(source.id, source.contentHash)) throw new Error(`Read the complete pinned source before using its passage: ${passage.sourceId}`);
+    if (!source?.fullRead || source.purpose === "background" || !adequateExtraction(source.extraction, state.config.readingRequirements) || !source.contentHash || (coverage !== undefined && !coverage.complete(source.id, source.contentHash))) throw new Error(`Read the complete pinned source before using its passage: ${passage.sourceId}`);
     let result: { matched: boolean; hash: string; offset: number | null; units: "utf16" | "unicode" };
     if (source.origin === "local" || source.origin === "integration") {
       if (!state.inputs || !state.location) throw new Error("Missing scoped evidence approval");
@@ -63,7 +73,7 @@ export function auditUnits(report: string, maxUnits = 80): { units: AuditUnit[];
     if (token.type === "heading") {
       if (/^(sources|references|bibliography)$/i.test((token as any).text.trim())) sourceSection = (token as any).depth;
       else if (sourceSection !== undefined && (token as any).depth <= sourceSection) sourceSection = undefined;
-      continue;
+      if (sourceSection !== undefined || /^(introduction|background|methods|results|findings|scope|conclusions?|recommendations?|limitations)$/i.test((token as any).text.trim())) continue;
     }
     if (sourceSection !== undefined || ["space", "hr", "def"].includes(token.type)) continue;
     const math = mathAt(token.raw.trim());
@@ -71,9 +81,10 @@ export function auditUnits(report: string, maxUnits = 80): { units: AuditUnit[];
     if (token.type === "html") { complete = false; exclusions.push("Raw HTML requires an explicit Markdown rewrite before a complete prose audit"); continue; }
     if (token.raw.length > 5000 || units.length >= Math.min(100, maxUnits)) { complete = false; exclusions.push("Prose audit block/coverage limit exceeded; no silent sampling"); continue; }
     const ids = [...new Set(citations(token))];
+    if (ids.length > 30) { complete = false; exclusions.push("Citation binding limit exceeded in a prose block"); continue; }
     const withoutCitations = token.raw.replace(/\[\[[^\]]+\]\]/g, "").replace(/^\s*\d+[.)]\s/gm, "");
     units.push({ id: `claim-${units.length + 1}-${digestHash(token.raw).slice(0, 8)}`, text: token.raw.trim(), citations: ids,
-      numeric: /\b\d+(?:[.,]\d+)?(?:%|\b)/.test(withoutCitations) });
+      numeric: token.type !== "heading" && /\b\d+(?:[.,]\d+)?(?:%|\b)/.test(withoutCitations) });
   }
   return { units, exclusions: [...new Set(exclusions)].slice(0, 20), complete };
 }

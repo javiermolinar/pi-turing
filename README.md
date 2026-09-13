@@ -480,9 +480,15 @@ Content, URL, DOI and near-copy relationships are conservative grouping signals,
 not proof that remaining sources are independent. Async worker validation must
 finish before a result is accepted.
 
-These contracts have offline fixtures, but no semantic audit or independence
-stage currently runs in the research pipeline. Model assessment, persistent stage
-coverage, corrections, re-audit and comparative evaluations remain unfinished.
+`src/audit-loop.ts` composes assessment and bounded corrections behind a host
+contract. It retains original findings, resumes completed batches, revalidates
+saved source proofs, and reassesses every prose block after a patch. Hosts must
+provide only source-reading tools, charge normal model usage, and atomically save
+the report, costs and versioned audit journal. The loop never increases limits.
+
+These components have offline fixtures, but no semantic audit or independence
+stage currently runs in the research pipeline. Production runner wiring and
+comparative evaluations remain unfinished.
 
 ## Development and tests
 

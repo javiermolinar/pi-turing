@@ -24,7 +24,8 @@ a separate knowledge product to rebuild. Central runs, explicit migration, Pi/we
 selection, literal report search, shared web assets, and portable exports are now
 implemented. Broader scholarly investigation, approved context/integrations,
 deeper research, and the final Python-to-TypeScript migration remain on the roadmap.
-Research parity is a target, not an established result.
+Research parity is a target, not an established result. [PARITY.md](PARITY.md)
+tracks retained contracts, intentional exclusions, tests, and unverified differences.
 
 ## Try it
 
@@ -200,6 +201,31 @@ Pi**. Replace those provider names in `.pi/hyperresearch.json`; they are no long
 accepted for execution. Old checkpoints remain readable for status and dashboard
 views. Legacy providers cannot execute and are never replaced silently. Existing
 checkout-local artifacts require explicit migration before central resume.
+
+## Scholarly discovery
+
+One `scholar_search` capability now composes TypeScript OpenAlex/Crossref adapters,
+independently of Python or its storage. New-run configuration can select either or
+both with `"scholarlyProviders": ["openalex", "crossref"]`; an empty list disables
+scholarly discovery. Unsupported providers are rejected, not substituted. Optional
+`HYPERRESEARCH_CONTACT_EMAIL` supplies the providers' courtesy contact parameter.
+This controls discovery only; the temporary Python full-text resolver and metadata
+refresh still need their own approval/routing work in later milestones.
+
+Results retain identifiers/DOIs, authors/dates, work type, version-aware full-text
+candidates, provider-specific citation counts, retraction/correction notices and
+provenance. Stable identifiers deduplicate compatible records; uncertain
+bibliographic matches and distinct versions stay explicit. Provider relevance
+ranks are interleaved, not replaced by citation-count ranking. Abstracts never count
+as full-read evidence. Batches and provider failures persist with the run and appear
+in dashboard coverage; source acquisition/reading remains a separate operation.
+
+Requests use fixed endpoints, no redirects/cookies, a ten-second provider deadline,
+2 MB response cap, five records/provider, per-provider serialization/courtesy delay,
+a private five-minute cache and bounded output. Rate limits do not trigger another
+provider. Offline fixtures pass; public-network adapter smoke tests and comparative
+research evaluation have not been performed. CORE/DOAB and specialist providers
+remain the next batches, not enabled capabilities.
 
 ## Run picker
 

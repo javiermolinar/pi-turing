@@ -1,13 +1,13 @@
 {
   "name": "pi-hyperresearch",
   "version": "0.1.0",
-  "description": "Evidence-based research for Pi, with a persistent vault and a static HTML dashboard",
+  "description": "Composable research for Pi with private runs, evidence tracking and portable reports",
   "type": "module",
   "license": "MIT",
   "keywords": ["pi-package", "research"],
   "engines": { "node": ">=22" },
   "pi": { "extensions": ["./extensions/index.ts"], "skills": ["./skills"] },
-  "files": ["extensions", "src", "web", "skills", "backend/bridge.py", "backend/pyproject.toml", "backend/uv.lock", "README.md", "PLAN.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "files": ["extensions", "src", "web", "skills", "backend/bridge.py", "backend/pyproject.toml", "backend/uv.lock", "README.md", "PLAN.md", "PARITY.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
     "migrate": "tsx scripts/migrate.ts",

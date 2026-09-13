@@ -2,7 +2,6 @@ import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { execute } from "./process.ts";
-import { searchProviderSchema, webSearch } from "./search.ts";
 
 export type BackendAction = "doctor" | "init" | "create_run" | "set_step" | "set_status" | "finish" | "retractions" | "vault_search" | "scholar_search" | "web_search" | "fetch_source" | "read_source";
 export interface Backend {
@@ -23,10 +22,7 @@ export class PythonBackend implements Backend {
   call<T>(action: BackendAction, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
     const operation = this.queue.then(async () => {
       signal?.throwIfAborted();
-      if (action === "web_search") {
-        // Search goes directly to the selected service in Node, never through upstream providers.
-        return await webSearch(searchProviderSchema.parse(args.provider), args.query as string, { signal }) as T;
-      }
+      if (action === "web_search" || action === "scholar_search") throw new Error("Discovery belongs to ResearchServices, not the Python working-state adapter");
       try { await access(python); } catch { throw new Error("Python backend missing. Run /hyperresearch setup first (requires uv)."); }
       const result = await execute(python, [join(backendDir, "bridge.py")], {
         cwd: this.cwd, input: JSON.stringify({ action, args }), signal,

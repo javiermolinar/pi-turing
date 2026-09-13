@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isAbsolute } from "node:path";
 import { searchProviderSchema } from "./search.ts";
+import { discoveryBatchSchema, scholarlyProviderSchema } from "./discovery-types.ts";
 
 export const stepIds = ["1", "2", "10", "15", "16"] as const;
 export type StepId = typeof stepIds[number];
@@ -12,6 +13,7 @@ export type Role = typeof roles[number];
 export const thinkingSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const configSchema = z.object({
   searchProvider: searchProviderSchema.default("brave"),
+  scholarlyProviders: z.array(scholarlyProviderSchema).max(2).default(["openalex", "crossref"]),
   concurrency: z.number().int().min(1).max(4).default(2),
   sourceTarget: z.number().int().min(10).max(30).default(15),
   maxTurns: z.number().int().min(5).max(150).default(80),
@@ -90,6 +92,7 @@ export const stateSchema = z.object({
   failures: z.array(z.object({ url: z.string(), error: z.string(), at: z.string() })),
   cost: z.number().nonnegative(), tokens: z.number().nonnegative(),
   pricingKnown: z.boolean(),
+  discoveries: z.array(discoveryBatchSchema).max(100).optional(),
   decomposition: decompositionSchema.optional(),
   research: z.array(researchSchema).default([]),
   report: z.string().max(200_000).optional(),

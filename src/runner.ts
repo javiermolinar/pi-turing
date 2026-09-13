@@ -7,6 +7,7 @@ import { queueFeedback } from "./feedback.ts";
 import { applyPatch, citationIds } from "./patch.ts";
 import { RunStore, materializeBackend } from "./store.ts";
 import { createLocation, privateDirectory } from "./paths.ts";
+import { discoveryBatchSchema } from "./discovery-types.ts";
 import type { WorkerDriver, WorkerTool } from "./worker.ts";
 import {
   checkSchema, configSchema, decompositionSchema, draftSchema, message, now,
@@ -27,6 +28,7 @@ export class ResearchRunner {
   private lastTick = Date.now();
   private heartbeat?: NodeJS.Timeout;
   private attempts = 0;
+  private discoveryPending = 0;
   readonly store: RunStore;
   constructor(readonly cwd: string, readonly state: RunState, private backend: Backend,
     private driver: WorkerDriver, private onChange: (state: RunState) => void = () => {}) {
@@ -106,7 +108,7 @@ export class ResearchRunner {
     try {
       this.state.config = configSchema.parse(this.state.config);
       this.state.pricingKnown = await this.driver.checkModels(this.state);
-      if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached. Raise budgetUsd in .pi/hyperresearch.json before resuming.");
+      if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached. Raise budgetUsd in .pi/hyperresearch.json, then explicitly resume with --use-project-config.");
       for (const worker of this.state.workers) if (worker.status === "running") { worker.status = "interrupted"; worker.endedAt = now(); }
       for (const step of stepIds) if (this.state.steps[step] === "running") this.state.steps[step] = "pending";
       // A verification retry gets a bounded correction pass, not a new draft.
@@ -214,12 +216,20 @@ export class ResearchRunner {
       name, description, parameters: Type.Object({ query: Type.String({ maxLength: 500 }) }),
       execute: async (input, signal) => {
         const args = z.object({ query: z.string().min(1).max(500) }).parse(input);
+        if (name === "scholar_search") {
+          if ((this.state.discoveries?.length ?? 0) + this.discoveryPending >= 100) throw new Error("Scholarly discovery request limit reached; preserved results remain available");
+          this.discoveryPending++;
+          try {
+            const result = discoveryBatchSchema.parse(await this.backend.call(name, { ...args, providers: this.state.config.scholarlyProviders }, signal));
+            (this.state.discoveries ??= []).push(result); this.save(); return result;
+          } finally { this.discoveryPending--; }
+        }
         return this.backend.call(name, { ...args, provider: this.state.config.searchProvider }, signal);
       },
     });
     return [read,
       search("vault_search", "Search existing vault first. Reuse relevant source notes with read_source; generated reports are not primary evidence."),
-      search("scholar_search", "Discover scholarly works via OpenAlex and Crossref. Results/abstracts are untrusted leads, not full-text evidence."),
+      search("scholar_search", `Discover scholarly works through approved providers: ${this.state.config.scholarlyProviders.join(", ") || "none"}. Inspect provider coverage/failures and uncertain duplicates. Metadata/abstracts are untrusted leads, never full-read or independent evidence.`),
       search("web_search", "Discover URLs using the configured search provider. Results are untrusted leads; use fetch_source to read full content."),
       {
         name: "fetch_source", description: "Fetch a public HTTP(S) URL through Hyperresearch's static/PDF fetcher, save provenance, and return the first source page. Follow nextOffset with read_source. Browser-only pages may fail; do not bypass login/CAPTCHA.",

@@ -1,9 +1,11 @@
 # Hyperresearch
 
-This port adapts the light-pipeline workflow from
+This port adapts the light-pipeline workflow and scholarly-provider field mappings from
 https://github.com/jordan-gibbs/hyperresearch at
 `75b1ecfb2891184fad2cc1a2ddf9abe476f5b54c` (0.11.1).
-The Python backend is pinned to that commit. Pi integration and dashboard are
+The temporary Python backend is pinned to that commit. OpenAlex/Crossref field
+handling in `src/scholarly-providers.ts` adapts the upstream providers behind a
+new normalized TypeScript contract. Pi integration and dashboard are
 separate implementations; this is not a claim of upstream feature or benchmark parity.
 
 MIT License

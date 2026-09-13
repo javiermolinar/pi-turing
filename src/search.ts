@@ -1,5 +1,6 @@
 import { parseDocument, DomUtils } from "htmlparser2";
 import { z } from "zod";
+import { boundedBody } from "./http.ts";
 
 export const searchProviderSchema = z.enum(["brave", "duckduckgo"]);
 export type SearchProvider = z.infer<typeof searchProviderSchema>;
@@ -78,27 +79,6 @@ const braveResponse = z.object({
 }).refine(data => data.web !== undefined || data.query !== undefined, "Missing search response fields");
 const textFromHtml = (html: string) => DomUtils.textContent(parseDocument(html));
 
-async function boundedBody(response: Response): Promise<string> {
-  const maxBytes = 1_000_000;
-  if (Number(response.headers.get("content-length")) > maxBytes) {
-    await response.body?.cancel(); throw new Error("Search response exceeds 1MB limit");
-  }
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("Search provider returned an empty response");
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      length += value.length;
-      if (length > maxBytes) { await reader.cancel(); throw new Error("Search response exceeds 1MB limit"); }
-      chunks.push(value);
-    }
-  } finally { reader.releaseLock(); }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 /** Fixed provider endpoints, no proxy, redirects, cookies, or automatic fallback. */
 export async function webSearch(provider: SearchProvider, query: string, options: {
   signal?: AbortSignal; fetchImpl?: typeof fetch; env?: SearchEnvironment;
@@ -126,7 +106,7 @@ export async function webSearch(provider: SearchProvider, query: string, options
     // Never echo provider bodies/headers: they may contain the API key.
     throw new Error(`${provider} search returned HTTP ${response.status}. No fallback attempted.`);
   }
-  const body = await boundedBody(response);
+  const body = await boundedBody(response, 1_000_000, signal);
   signal.throwIfAborted();
   if (provider === "duckduckgo") return parseDuckDuckGo(body);
   let parsed: z.infer<typeof braveResponse>;

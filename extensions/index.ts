@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { PythonBackend, setupBackend } from "../src/backend.ts";
+import { ResearchServices } from "../src/services.ts";
 import { execute } from "../src/process.ts";
 import { ResearchRunner } from "../src/runner.ts";
 import { startDashboard, startInventory } from "../src/server.ts";
@@ -128,7 +129,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
       const location = selected ? requireLocation(selected, root) : createLocation(ctx.cwd, root);
       const config = selected && !useProjectConfig ? configSchema.parse(selected.config) : loadConfig(ctx.cwd);
       if (ctx.hasUI && !await ctx.ui.confirm(selected ? (revision ? "Create revision?" : "Resume paid research?") : "Start research?",
-        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.") : "No local files or integrations attached."}`)) return;
+        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nScholarly: ${config.scholarlyProviders.join(", ") || "disabled"}\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.") : "No local files or integrations attached."}`)) return;
       const lost = (error: Error) => { lifecycle.abort(); active?.stop("paused"); say(ctx, `Runner lock lost: ${message(error)}`); };
       const unlockRoot = await lockDataRoot(root, lost);
       release = unlockRoot;
@@ -140,7 +141,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
         if (JSON.stringify(current) !== JSON.stringify(selected)) throw new Error("Run changed while awaiting approval. Select it again.");
       }
       ensureSearchConfigured(config.searchProvider);
-      const backend = new PythonBackend(location.workspacePath);
+      const backend = new ResearchServices(new PythonBackend(location.workspacePath));
       const driver = await PiWorkerDriver.create(ctx, location.workspacePath);
       lifecycle.signal.throwIfAborted();
       if (query !== undefined || revision) {

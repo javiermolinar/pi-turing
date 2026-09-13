@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import type { Backend, BackendAction } from "../src/backend.ts";
 import { ResearchRunner } from "../src/runner.ts";
 import { createLocation } from "../src/paths.ts";
+import { ResearchServices } from "../src/services.ts";
+import { ScholarlyDiscovery } from "../src/scholarly.ts";
 import { configSchema, type RunState } from "../src/types.ts";
 import type { WorkRequest, WorkerDriver } from "../src/worker.ts";
 import { fixture } from "./fixtures.ts";
@@ -59,6 +61,25 @@ async function setup() {
   const runner = await ResearchRunner.create(cwd, "Verbatim question?", configSchema.parse({}), "test/mock", "off", backend, driver, undefined, undefined, createLocation(cwd, cwd));
   return { cwd, backend, driver, runner, cleanup: () => rmSync(cwd, { recursive: true, force: true }) };
 }
+
+test("scholarly batches and coverage persist without counting discovery metadata as full-read sources", async () => {
+  const env = await setup();
+  try {
+    env.runner.state.config.scholarlyProviders = ["openalex"];
+    const discovery = new ScholarlyDiscovery({ env: {}, minIntervalMs: 0, fetchImpl: async () => Response.json({ results: [{ id: "https://openalex.org/W9", title: "Discovery lead", type: "article", doi: "10.1234/lead", abstract_inverted_index: { Abstract: [0] } }] }) });
+    const backend = new ResearchServices(env.backend, discovery);
+    const work = env.driver.run.bind(env.driver);
+    env.driver.run = async (request, state) => {
+      if (request.role === "research") await request.tools.find(tool => tool.name === "scholar_search")!.execute({ query: `Discovery for ${request.id}` }, request.signal);
+      return work(request, state);
+    };
+    const runner = new ResearchRunner(env.cwd, env.runner.state, backend, env.driver); await runner.run();
+    const state = runner.store.load(); assert.equal(state.status, "done"); assert.equal(state.discoveries?.length, 2);
+    assert.equal(state.discoveries![0].results[0].evidence, "discovery-only");
+    assert.equal(state.sources.length, 2); assert.ok(state.sources.every(source => source.id.startsWith("source-")));
+    assert.ok(!env.backend.calls.includes("scholar_search"));
+  } finally { env.cleanup(); }
+});
 
 test("light pipeline orders stages, requires source reads, patches and verifies", async () => {
   const env = await setup();

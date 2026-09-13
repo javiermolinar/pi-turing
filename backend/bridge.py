@@ -95,13 +95,7 @@ def dispatch(action: str, args: dict):
         if action == "vault_search":
             return cli(["search", "--no-body", "--limit", "10", "--json", "--", args["query"]])
         if action == "scholar_search":
-            # Bound both provider work and output; failures remain visible.
-            result = cli(["scholar", "search", "-s", "openalex", "-s", "crossref", "-n", "5", "-j", "--", args["query"]])
-            from hyperresearch.core.untrusted import wrap_body
-            for item in result.get("results", []):
-                if item.get("abstract"):
-                    item["abstract"] = wrap_body(item["abstract"][:600], item.get("url") or "scholarly-search")
-            return result
+            raise ValueError("Scholarly discovery moved to the composable TypeScript adapters. Reload Pi; no Python discovery fallback is enabled.")
         if action == "web_search":
             raise ValueError("Web search moved to the direct Brave/DuckDuckGo Node adapter. Pause and reload Pi; upstream search providers are disabled.")
         if action == "fetch_source":

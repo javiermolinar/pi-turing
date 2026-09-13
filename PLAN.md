@@ -576,14 +576,17 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ### M2 — Scholarly investigation
 
-- [ ] Define the normalized discovery result and provider-capability contract.
-- [ ] Consolidate OpenAlex/Crossref results with version-aware, conservative
+- [x] Define the normalized discovery result and provider-capability contract.
+- [x] Consolidate OpenAlex/Crossref results with version-aware, conservative
       deduplication and complete provider provenance.
 - [ ] Integrate CORE/DOAB through existing adapters where suitable.
 - [ ] Integrate ClinicalTrials.gov, EDGAR, and FRED for relevant questions with
       required credentials/contact configuration; document RePEc's search gap.
-- [ ] Add approved-provider routing, full-text candidate resolution, courtesy
-      limits, caching, deadlines, cancellation, and visible partial failures.
+- [x] Add approved OpenAlex/Crossref discovery routing, versioned full-text
+      candidates, courtesy limits, caching, deadlines, cancellation, and visible
+      partial failures; persist batches without counting metadata as full reads.
+- [ ] Extend routing/resolution and credentials contracts to additional providers
+      and Python-composed acquisition/resolver operations.
 - [ ] Test work-type distinctions, missing credentials, false merges, retractions,
       incomplete results, and the rule that abstracts/snippets are not full reads.
 - [ ] Run explicitly approved adapter smoke tests and document actual coverage;
@@ -642,7 +645,9 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ### M6 — Pure TypeScript migration and research parity
 
-- [ ] Build and maintain a parity matrix against pinned upstream research behavior;
+- [x] Start PARITY.md against pinned upstream research behavior; maintain it as
+      capabilities are replaced (this is not a parity claim).
+- [ ] Complete the operation-level parity audit and comparative evaluation;
       classify supported, partial, deferred, unverified, and intentionally excluded
       capabilities, with evidence and tests for each retained contract.
 - [ ] Replace Python discovery/acquisition/readers with composable TypeScript
@@ -667,9 +672,11 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ## Next implementation slice
 
-Start with **M1a**, then deliver the picker, shared web inventory/search, and report
-exports as small reviewable changes. Keep **scholarly investigation in M2** as the
-next research capability priority. The important remaining work is better research
-and reports—not a new database or central vault manager. Finish with M6's pure
+**M1a–M1d are implemented and tested.** One existing checkout-local run was copied
+to central storage with its originals preserved. **M2's OpenAlex/Crossref batch**
+now uses normalized TypeScript discovery independently of the Python working-state
+adapter; public-network validation remains unperformed. Continue with CORE/DOAB,
+then specialist providers, keeping consent and capability failures explicit.
+The important remaining work is better research and reports—not a new database or central vault manager. Finish with M6's pure
 TypeScript migration once the research contracts and parity evidence are in place;
 do not port out-of-scope knowledge-base features merely because upstream has them.

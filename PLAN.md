@@ -527,10 +527,10 @@ absent. Keep regression coverage for the working light pipeline throughout.
       refusal, rollback, and original-preservation behavior.
 - [x] Test cwd-independent loading, missing/corrupt runs, shared workspaces,
       lock ownership, and interrupted migration (including a killed process).
-- [ ] Add a relocated-package integration test; package paths currently resolve
-      from import.meta.url independently of state.
+- [x] Test relocated-package asset/backend resolution from import.meta.url,
+      independently of central state and cwd.
 - [x] Test that view/list never resume work or replace saved context.
-- [ ] Extend the no-work/no-context-replacement assertion to report search in M1c.
+- [x] Extend the no-work/no-context-replacement assertion to report search in M1c.
 
 ### M1b — Pi run picker
 
@@ -545,20 +545,20 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ### M1c — Shared web app, inventory, and grep-like search
 
-- [ ] Extract shared web shell/CSS/browser code and package those assets once.
-- [ ] Serve central inventory and selected-run views through one read-only app;
+- [x] Extract shared web shell/CSS/browser code and package those assets once.
+- [x] Serve central inventory and selected-run views through one read-only app;
       stop writing full `dashboard.html` files at every checkpoint.
-- [ ] Switch selected-run subscriptions safely; ignore stale events from previous
+- [x] Switch selected-run subscriptions safely; ignore stale events from previous
       selections and show connection/ownership status honestly.
-- [ ] Add metadata filtering and literal report-content search with run identity,
+- [x] Add metadata filtering and literal report-content search with run identity,
       escaped snippets, match locations, and explicit search scope.
-- [ ] Bound scan work, input/output sizes, time, and result counts; add cancellation,
+- [x] Bound scan work, input/output sizes, time, and result counts; add cancellation,
       partial-result indicators, and useful empty/error states.
-- [ ] Define inventory-scoped versus run-scoped access and filter all metadata,
+- [x] Define inventory-scoped versus run-scoped access and filter all metadata,
       counts, reports, and matches accordingly; expose no arbitrary file routes.
-- [ ] Test run switching, reconnect, mobile/keyboard use, reduced motion, hostile
+- [x] Test run switching, reconnect, mobile/keyboard use, reduced motion, hostile
       report text/queries, path traversal, inaccessible runs, and changing files.
-- [ ] Assert that searches make no model calls or external network requests.
+- [x] Assert that searches make no model calls or external network requests.
 
 ### M1d — Portable report delivery
 

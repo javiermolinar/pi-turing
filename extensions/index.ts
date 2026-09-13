@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@e
 import { PythonBackend, setupBackend } from "../src/backend.ts";
 import { execute } from "../src/process.ts";
 import { ResearchRunner } from "../src/runner.ts";
-import { startDashboard } from "../src/server.ts";
+import { startDashboard, startInventory } from "../src/server.ts";
 import { ensureSearchConfigured } from "../src/search.ts";
 import { queueFeedback, feedbackSummary } from "../src/feedback.ts";
 import { progressLines } from "../src/progress.ts";
@@ -30,7 +30,8 @@ const help = `Hyperresearch — light pipeline (experimental)
 /hyperresearch resume [tag]      Resume with saved context/configuration
   Add --use-project-config to explicitly propose current project preferences
 /hyperresearch cancel            Abort; keep artifacts
-/hyperresearch dashboard [tag]   Open live localhost dashboard
+/hyperresearch dashboard [tag]   Open a run-scoped localhost dashboard
+/hyperresearch dashboard all     Open central inventory (broader read access)
 /hyperresearch snapshot [tag]    Open saved standalone HTML
 /hyperresearch setup             Install the pinned backend with uv
 /hyperresearch migrate [apply]   Preview/copy this checkout's legacy runs
@@ -53,6 +54,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
   let latest: RunState | undefined;
   let dashboard: Awaited<ReturnType<typeof startDashboard>> | undefined;
   let dashboardTag: string | undefined;
+  let inventoryDashboard: Awaited<ReturnType<typeof startInventory>> | undefined;
   let release: (() => Promise<void>) | undefined;
   let lifecycle = new AbortController();
   let widget: ResearchWidget | undefined;
@@ -71,6 +73,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
     latest = structuredClone(state);
     const live = active?.state.tag === state.tag && !lifecycle.signal.aborted;
     if (dashboardTag === state.tag) dashboard?.publish(state, live);
+    inventoryDashboard?.publish(state, live);
     const url = dashboardTag === state.tag ? dashboard?.url : undefined;
     if (ctx.mode === "tui") {
       if (!widget) ctx.ui.setWidget("hyperresearch", (tui, theme) => {
@@ -262,9 +265,21 @@ export default function hyperresearch(pi: ExtensionAPI) {
         }
         if (["status", "dashboard", "snapshot"].includes(command)) {
           trusted(ctx);
+          if (command === "dashboard" && argument === "all") {
+            if (dashboardOpening) throw new Error("Dashboard is already opening");
+            if (!inventoryDashboard && ctx.hasUI && !await ctx.ui.confirm("Open central inventory?", "This new token grants read access to all accessible central investigations and their reports, across projects. Existing single-run tokens stay scoped to one run. No workers or model costs.")) return;
+            dashboardOpening = (async () => {
+              inventoryDashboard ??= await startInventory(dataRoot());
+              if (lifecycle.signal.aborted) { await inventoryDashboard.close(); inventoryDashboard = undefined; return; }
+              if (active) inventoryDashboard.publish(active.state, true);
+              await open(inventoryDashboard.url, ctx);
+            })();
+            try { await dashboardOpening; } finally { dashboardOpening = undefined; }
+            return;
+          }
           const state = resolveState(ctx, argument || undefined);
           if (command === "status") { show(state, ctx); say(ctx, `${state.tag}: ${state.status}${state.reason ? ` — ${state.reason}` : ""}\nSteering: ${feedbackSummary(state)}${state.feedback.length ? "\n" + state.feedback.map(f => `${f.id}. ${f.status}: ${f.text}`).join("\n") : ""}`); return; }
-          if (command === "snapshot") { await open(pathToFileURL(join(new RunStore(dataRoot(), state.tag).dir, "dashboard.html")).href, ctx); return; }
+          if (command === "snapshot") { await open(pathToFileURL(new RunStore(dataRoot(), state.tag).snapshot()).href, ctx); return; }
           if (dashboardOpening) throw new Error("Dashboard is already opening");
           dashboardOpening = (async () => {
             lifecycle.signal.throwIfAborted();
@@ -306,7 +321,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
         await task;
         const state = runner?.state;
         if (!state || state.status !== "done") throw new Error(state?.reason ?? "Research did not complete");
-        return { content: [{ type: "text", text: `Light research verified. Report: ${runner!.store.reportPath}\nDashboard snapshot: ${join(runner!.store.dir, "dashboard.html")}` }], details: { tag: state.tag, cost: state.cost, tokens: state.tokens } };
+        return { content: [{ type: "text", text: `Light research verified. Report: ${runner!.store.reportPath}\nOffline snapshot: /hyperresearch snapshot ${state.tag}` }], details: { tag: state.tag, cost: state.cost, tokens: state.tokens } };
       } finally { signal?.removeEventListener("abort", abort); }
     },
   });
@@ -342,6 +357,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
     active?.stop("paused");
     await Promise.allSettled([task, dashboardOpening]);
     await dashboard?.close(); dashboard = undefined; dashboardTag = undefined;
+    await inventoryDashboard?.close(); inventoryDashboard = undefined;
     disposeWidget();
     if (ctx.hasUI) ctx.ui.setWidget("hyperresearch", undefined);
   });

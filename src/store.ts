@@ -70,7 +70,11 @@ export class RunStore {
         unlinkSync(path);
       }
     }
-    atomicWrite(join(this.dir, "dashboard.html"), renderDashboard(state));
+  }
+  snapshot(): string {
+    const path = safePath(this.root, "runs", this.tag, "dashboard.html");
+    atomicWrite(path, renderDashboard(this.load()));
+    return path;
   }
 }
 /** Temporary Python adapter views; central checkpoint remains authoritative. */
@@ -94,13 +98,23 @@ export function materializeBackend(state: RunState): void {
 export interface Inventory {
   runs: RunState[];
   issues: { tag: string; error: string }[];
+  partial?: boolean;
 }
-export function inventory(root: string): Inventory {
+export function inventory(root: string, allowedTags?: ReadonlySet<string>): Inventory {
   const result: Inventory = { runs: [], issues: [] };
   const dir = safePath(root, "runs");
   if (!existsSync(dir)) return result;
+  const deadline = Date.now() + 1000;
+  let bytes = 0; let count = 0;
   for (const tag of readdirSync(dir)) {
-    try { result.runs.push(new RunStore(root, tag).load()); }
+    if (allowedTags && !allowedTags.has(tag)) continue;
+    if (++count > 1000 || Date.now() > deadline) { result.partial = true; break; }
+    try {
+      const store = new RunStore(root, tag);
+      bytes += lstatSync(safePath(root, "runs", tag, "pi-state.json")).size;
+      if (bytes > 32_000_000) { result.partial = true; break; }
+      result.runs.push(store.load());
+    }
     catch (error) { result.issues.push({ tag, error: error instanceof Error ? error.message : String(error) }); }
   }
   result.runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

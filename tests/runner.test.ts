@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Backend, BackendAction } from "../src/backend.ts";
@@ -68,7 +68,7 @@ test("light pipeline orders stages, requires source reads, patches and verifies"
     assert.deepEqual(env.driver.roles, ["decompose", "research", "research", "draft", "polish", "readability"]);
     assert.ok(env.runner.state.sources.every(s => s.fullRead));
     assert.match(readFileSync(env.runner.store.reportPath, "utf8"), /Clear sentence/);
-    assert.match(readFileSync(join(env.runner.store.dir, "dashboard.html"), "utf8"), /Offline snapshot/);
+    assert.equal(existsSync(join(env.runner.store.dir, "dashboard.html")), false);
     assert.equal(env.backend.calls.at(-1), "finish");
     assert.equal(env.runner.state.tokens, 600);
     assert.equal(env.runner.state.query, "Verbatim question?");

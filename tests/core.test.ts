@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPatch, citationIds } from "../src/patch.ts";
@@ -38,7 +38,8 @@ test("checkpoint rematerializes report and refuses traversal and symlinks", () =
     assert.equal(store.load().report, "# Actual report");
     writeFileSync(store.reportPath, "interrupted materialized view");
     store.save(store.load()); assert.equal(readFileSync(store.reportPath, "utf8"), state.report);
-    assert.match(readFileSync(join(store.dir, "dashboard.html"), "utf8"), /Offline snapshot/);
+    assert.equal(existsSync(join(store.dir, "dashboard.html")), false);
+    assert.match(readFileSync(store.snapshot(), "utf8"), /Offline snapshot/);
     for (const tag of ["../escape", "/absolute", "a/b", "..", ""]) assert.throws(() => validateTag(tag));
     const outside = join(cwd, "outside"); writeFileSync(outside, "safe");
     symlinkSync(outside, join(cwd, "alias"));

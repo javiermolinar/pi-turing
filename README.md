@@ -218,17 +218,29 @@ actions follow in the report-delivery slice.
 `/hyperresearch dashboard` starts a small Node HTTP server **only when requested**:
 
 - Binds to `127.0.0.1` on a random port, behind a random per-server URL token.
-- Serves one page and an SSE endpoint; no arbitrary filesystem routes, write
-  endpoints, CORS access, frontend framework, or build pipeline.
+- Serves shared package assets, scoped run views and SSE; no arbitrary filesystem
+  routes, write endpoints, CORS access, frontend framework, or build pipeline.
 - Updates pipeline, worker activity, sources, failures, cost estimates, and checks.
 - Reconnects after a dropped connection and displays the last snapshot when offline.
 - Stops on extension reload, session replacement, or Pi exit.
 
-The runner also atomically rewrites `dashboard.html` at each checkpoint. This is
-self-contained, works under `file://`, makes no external requests, and can be read
-after Pi exits. Refresh it to load newer snapshots. Live and offline pages use the
-same renderer. Source HTML is escaped; report Markdown uses a restrictive sanitizer
-and CSP. No remote images are loaded.
+The shared application lives in `web/`. Checkpoints write data, not a website.
+`/hyperresearch snapshot <tag>` explicitly generates a self-contained HTML copy
+that works under `file://` without external requests. Live and offline pages use
+the same renderer/sanitizer and restrictive CSP. No remote images are loaded.
+
+`/hyperresearch dashboard all` opens a separate, explicitly approved inventory
+capability covering all accessible central investigations. Existing run-scoped
+tokens never gain broader access. Run selection switches subscriptions and rejects
+late events; saved external state refreshes without claiming runner ownership.
+
+**Filter runs** matches metadata. **Search reports** performs literal,
+case-insensitive search over accessible `report.md` files, not checkpoints, source
+bodies, attachments or credentials. Results show run IDs, excerpts and Markdown
+line context. No models, embeddings, database or external requests are involved.
+Search is cancellable and discloses partial results: defaults are 40 matches,
+1 MB per report, 16 MB scanned and two seconds, with at most two concurrent searches.
+Inventory enumeration is bounded to 1,000 entries, 32 MB and one second per scan.
 
 Report citations (`[[source-id]]`, including aliases and fragments) link to the
 recorded source URL. Citation numbers match the Sources table. Known vault-note
@@ -257,7 +269,7 @@ review them before sharing.
     prompt-decomposition.json
     polish-log.json
     readability-decisions.json
-    dashboard.html               # Offline snapshot (shared-shell work follows)
+    dashboard.html               # Created only by explicit snapshot export
   workspaces/<workspace-id>/      # Private, replaceable Python adapter state
     .hyperresearch/              # Temporary backend config/SQLite
     research/                    # Evidence/assets and backend materialized views

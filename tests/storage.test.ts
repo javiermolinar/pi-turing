@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLocation, dataRoot, packageRoot, privateDirectory, requireLocation } from "../src/paths.ts";
 import { inventory, RunStore } from "../src/store.ts";
 import { lockDataRoot, lockWorkspace } from "../src/locks.ts";
 import { fixture } from "./fixtures.ts";
+import { execute } from "../src/process.ts";
+import { pathToFileURL } from "node:url";
 
 test("central identity and inventory preserve saved context without materializing or starting work", () => {
   const dir = mkdtempSync(join(tmpdir(), "hpr-central-"));
@@ -34,6 +36,22 @@ test("central identity and inventory preserve saved context without materializin
     assert.equal(inventory(root).runs.length, 1); // Viewing does not require a backend.
     assert.throws(() => requireLocation(store.load(), root));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("relocated package resolves shared assets/backend independently of central state and cwd", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hpr-relocation-"));
+  try {
+    const pkg = join(root, "package"); privateDirectory(pkg);
+    cpSync(join(packageRoot, "src"), join(pkg, "src"), { recursive: true });
+    cpSync(join(packageRoot, "web"), join(pkg, "web"), { recursive: true });
+    writeFileSync(join(pkg, "package.json"), '{"type":"module"}');
+    symlinkSync(join(packageRoot, "node_modules"), join(pkg, "node_modules"));
+    const state = fixture(); const data = join(root, "data"); new RunStore(data, state.tag).save(state);
+    const code = `import { RunStore } from ${JSON.stringify(pathToFileURL(join(pkg, "src/store.ts")).href)}; import { backendDir } from ${JSON.stringify(pathToFileURL(join(pkg, "src/backend.ts")).href)}; console.log(JSON.stringify({ tag: new RunStore(${JSON.stringify(data)}, ${JSON.stringify(state.tag)}).load().tag, backendDir }));`;
+    const result = await execute(process.execPath, ["--import", pathToFileURL(join(packageRoot, "node_modules/tsx/dist/loader.mjs")).href, "--input-type=module", "-e", code], { cwd: root });
+    assert.equal(result.code, 0, result.stderr);
+    const loaded = JSON.parse(result.stdout); assert.equal(loaded.tag, state.tag); assert.equal(loaded.backendDir, join(realpathSync(pkg), "backend") + "/");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("inventory exposes corrupt checkpoints and refuses symlink paths and mismatched IDs", () => {

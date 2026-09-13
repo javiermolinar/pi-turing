@@ -1,0 +1,8 @@
+node_modules/
+backend/.venv/
+__pycache__/
+*.pyc
+research/
+.hyperresearch/
+.hyperresearch-runner.lock/
+artifacts/

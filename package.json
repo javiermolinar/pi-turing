@@ -1,0 +1,20 @@
+{
+  "name": "pi-hyperresearch",
+  "version": "0.1.0",
+  "description": "Evidence-based research for Pi, with a persistent vault and a static HTML dashboard",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "research"],
+  "engines": { "node": ">=22" },
+  "pi": { "extensions": ["./extensions/index.ts"], "skills": ["./skills"] },
+  "files": ["extensions", "src", "skills", "backend/bridge.py", "backend/pyproject.toml", "backend/uv.lock", "README.md", "PLAN.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "scripts": {
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test:backend": "uv run --project backend --locked python -m unittest discover -s tests -p '*_test.py'",
+    "test:browser": "tsx scripts/preview.ts"
+  },
+  "dependencies": { "katex": "^0.18.7", "htmlparser2": "^10.1.0", "marked": "^17.0.0", "sanitize-html": "^2.17.0", "proper-lockfile": "^4.1.2", "zod": "^4.3.6" },
+  "peerDependencies": { "@earendil-works/pi-tui": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-ai": "*", "typebox": "*" },
+  "devDependencies": { "@types/node": "^22.0.0", "@types/sanitize-html": "^2.16.0", "@types/proper-lockfile": "^4.1.4", "tsx": "^4.20.0", "typescript": "^5.9.0", "playwright": "^1.58.0" }
+}

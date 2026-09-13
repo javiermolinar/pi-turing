@@ -7,7 +7,7 @@
   "keywords": ["pi-package", "research"],
   "engines": { "node": ">=22" },
   "pi": { "extensions": ["./extensions/index.ts"], "skills": ["./skills"] },
-  "files": ["extensions", "src", "web", "skills", "backend/bridge.py", "backend/pyproject.toml", "backend/uv.lock", "README.md", "PLAN.md", "PARITY.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "files": ["extensions", "src", "web", "skills", "backend/bridge.py", "backend/pyproject.toml", "backend/uv.lock", "README.md", "PLAN.md", "PARITY.md", "INTEGRATIONS.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
     "migrate": "tsx scripts/migrate.ts",

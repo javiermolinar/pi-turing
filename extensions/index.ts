@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { availableReaderIds } from "../src/capabilities.ts";
 import { approveContext, previewContext, reapproveContext, revokeContext, validateContext, type ContextPreview } from "../src/context.ts";
 import type { ContextRequest, Disclosure } from "../src/context-types.ts";
 import { PythonBackend, setupBackend } from "../src/backend.ts";
@@ -126,11 +127,17 @@ export default function hyperresearch(pi: ExtensionAPI) {
       if (!purpose) return;
       files.push({ path, purpose: purpose.startsWith("Background") ? "background" : "evidence" });
     }
-    return { instructions, files };
+    const capabilities = [...(initial.capabilities ?? [])];
+    const registered = availableReaderIds();
+    while (capabilities.length < 8 && registered.some(id => !capabilities.includes(id)) && await ctx.ui.confirm("Add an additional scoped source?", `Registered read-only adapters: ${registered.join(", ")}\nSelected: ${capabilities.join(", ") || "none"}. Skills and integrations are never inherited from ambient Pi tools.`)) {
+      const id = await ctx.ui.select("Select a scoped source for approval", registered.filter(id => !capabilities.includes(id))); if (!id) return;
+      capabilities.push(id);
+    }
+    return { instructions, files, capabilities };
   }
   async function contextPermissions(ctx: ExtensionContext, summary: string): Promise<Disclosure | undefined> {
     if (!ctx.hasUI) throw new Error("Local context and additional instructions require interactive disclosure approval before model work");
-    if (!await ctx.ui.confirm("Approve context for research models?", `${summary}\nThe selected research models will receive this context. Text is untrusted data; instructions cannot grant tools. Nothing is sent if you decline.`)) return;
+    if (!await ctx.ui.confirm("Approve context for research models?", `${summary}\nThe selected research models will receive this context. Listed read-only integrations may receive research queries within their fixed scopes; their fees are separate from the model ceiling. Text is untrusted data; instructions cannot grant other tools. Nothing is sent if you decline.`)) return;
     const search = await ctx.ui.confirm("Allow context in public search/acquisition requests?", "Separate permission. If declined, private context is reserved for drafting; later public requests are disabled after it is used. Public research still runs first without these inputs.");
     const exportAllowed = await ctx.ui.confirm("Allow exporting reports derived from this context?", "Separate permission. This allows derived report copies, not source attachments. If declined, read-only viewing remains available but Markdown/HTML export and Save report are blocked after context use.");
     return { model: true, search, export: exportAllowed };
@@ -154,10 +161,10 @@ export default function hyperresearch(pi: ExtensionAPI) {
       if (selected?.inputs) validateContext(location.workspacePath, selected.inputs);
       let preview: ContextPreview | undefined; let permissions: Disclosure | undefined;
       if (!selected) {
-        const requested = await contextRequest(ctx, location.projectPath, { instructions: config.additionalInstructions, files: config.contextFiles });
+        const requested = await contextRequest(ctx, location.projectPath, { instructions: config.additionalInstructions, files: config.contextFiles, capabilities: config.capabilities });
         if (!requested) return;
-        config.additionalInstructions = requested.instructions; config.contextFiles = requested.files;
-        if (requested.instructions || requested.files.length) {
+        config.additionalInstructions = requested.instructions; config.contextFiles = requested.files; config.capabilities = requested.capabilities ?? [];
+        if (requested.instructions || requested.files.length || requested.capabilities?.length) {
           preview = previewContext(location.projectPath, requested);
           permissions = await contextPermissions(ctx, JSON.stringify(preview, null, 2)); if (!permissions) return;
         }
@@ -166,7 +173,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
         if (!permissions) return;
       }
       if (ctx.hasUI && !await ctx.ui.confirm(selected ? (revision ? "Create revision?" : "Resume paid research?") : "Start research?",
-        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nScholarly: ${config.scholarlyProviders.join(", ") || "disabled"}\nFull-text resolvers: ${config.fullTextResolvers.join(", ") || "disabled"} (Unpaywall needs HYPERRESEARCH_CONTACT_EMAIL; CORE needs CORE_API_KEY)\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.") : preview ? "Only the separately approved context will be attached; no ambient integrations are loaded." : "No local files or integrations attached."}${selected?.inputs ? `\nSaved context grant: ${selected.inputs.grant.id}; model/search/export permissions remain scoped to this run.` : ""}`)) return;
+        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nRole model overrides: ${JSON.stringify(config.models)}\nSearch: ${config.searchProvider}\nScholarly: ${config.scholarlyProviders.join(", ") || "disabled"}\nFull-text resolvers: ${config.fullTextResolvers.join(", ") || "disabled"} (Unpaywall needs HYPERRESEARCH_CONTACT_EMAIL; CORE needs CORE_API_KEY)\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.") : preview ? "Only the separately approved context will be attached; no ambient integrations are loaded." : "No local files or integrations attached."}${selected?.inputs ? `\nSaved context grant: ${selected.inputs.grant.id}; model/search/export permissions remain scoped to this run.` : ""}`)) return;
       const lost = (error: Error) => { lifecycle.abort(); active?.stop("paused"); say(ctx, `Runner lock lost: ${message(error)}`); };
       const unlockRoot = await lockDataRoot(root, lost);
       release = unlockRoot;
@@ -310,7 +317,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
             return;
           }
           if (!["paused", "failed", "blocked"].includes(selected.status)) throw new Error("Attach context to a paused run, or create an explicitly approved revision");
-          const request = await contextRequest(ctx, location.projectPath, { instructions: "", files: [] }); if (!request || (!request.instructions && !request.files.length)) return;
+          const request = await contextRequest(ctx, location.projectPath, { instructions: "", files: [] }); if (!request || (!request.instructions && !request.files.length && !request.capabilities?.length)) return;
           const preview = previewContext(location.projectPath, request);
           say(ctx, "Context proposal pending approval; no steering or model work has started.");
           const permissions = await contextPermissions(ctx, JSON.stringify(preview, null, 2)); if (!permissions) return;
@@ -413,7 +420,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
         await task;
         const state = runner?.state;
         if (!state || state.status !== "done") throw new Error(state?.reason ?? "Research did not complete");
-        return { content: [{ type: "text", text: `Light research verified. Report: ${runner!.store.reportPath}\nOffline snapshot: /hyperresearch snapshot ${state.tag}` }], details: { tag: state.tag, cost: state.cost, tokens: state.tokens } };
+        return { content: [{ type: "text", text: state.inputs ? `Light research completed with approved private/scoped context. View it with /hyperresearch dashboard ${state.tag}. Do not read its checkpoint or report into this chat without explicit disclosure approval for the current chat model.` : `Light research verified. Report: ${runner!.store.reportPath}\nOffline snapshot: /hyperresearch snapshot ${state.tag}` }], details: { tag: state.tag, cost: state.cost, tokens: state.tokens } };
       } finally { signal?.removeEventListener("abort", abort); }
     },
   });
@@ -422,12 +429,13 @@ export default function hyperresearch(pi: ExtensionAPI) {
     if (!state || !ctx.isProjectTrusted()) return;
     return {
       systemPrompt: event.systemPrompt + "\nHyperresearch workers are isolated from this chat. Ordinary prompts do not steer them. " +
-        "For progress questions, read the checkpoint or report as needed. Do not edit host-owned research state or claim feedback was applied through chat. " +
+        (state.inputs ? "Contextual research was approved for its saved research models, not automatic disclosure to this chat. Answer progress questions from the status fields below; obtain explicit user approval before reading its checkpoint, report or snapshots into the current chat model. " : "For progress questions, read the checkpoint or report as needed. ") +
+        "Do not edit host-owned research state or claim feedback was applied through chat. " +
         "Direct the user to /hyperresearch steer <feedback> or /hyperresearch revise <tag> <feedback> for changes.",
       message: { customType: "hyperresearch-context", display: false, content: JSON.stringify({
         tag: state.tag, status: state.status, liveInThisSession: !!active, activity: state.activity,
-        steering: feedbackSummary(state), checkpoint: join(new RunStore(dataRoot(), state.tag).dir, "pi-state.json"),
-        report: new RunStore(dataRoot(), state.tag).reportPath,
+        steering: feedbackSummary(state),
+        ...(state.inputs ? { contextual: true } : { checkpoint: join(new RunStore(dataRoot(), state.tag).dir, "pi-state.json"), report: new RunStore(dataRoot(), state.tag).reportPath }),
       }) },
     };
   });

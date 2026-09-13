@@ -614,18 +614,24 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 - [x] Add the optional instruction field to starts and explicitly approved,
       paused-run context steering. Ordinary chat still cannot steer workers.
-- [ ] Resolve requested knowledge bases/skills/tools into an explicit capability
-      proposal; show unavailable or unsupported requirements before starting work.
-- [ ] Bind only approved scoped tools/procedures to isolated workers; no ambient
+- [x] Resolve selected reader/skill adapter IDs into explicit capability proposals;
+      missing/unavailable adapters fail before model work. No natural-language
+      request grants ambient skills or tools. INTEGRATIONS.md documents binding
+      existing systems and the shipped explicit-file-collection reader.
+- [x] Bind only approved scoped tools/procedures to isolated workers; no ambient
       skill/extension loading or unrestricted shell/file access.
-- [ ] Save instruction text, skill definition/version/hash, integration scope,
+- [x] Save instruction text, skill definition/version/hash, integration scope,
       approval records, and credential references—not secret values—with the run.
-- [ ] Track retrieved documents as evidence with origin and version/hash; do not
-      cite the skill itself or count internal context as external corroboration.
-- [ ] Separate pending approval from queued/applied steering; apply approved changes
-      at safe boundaries and preserve the audit trail across revisions.
-- [ ] Test malicious source/skill instructions, missing or changed bindings, revoked
-      permissions, resume from another project, and external-disclosure boundaries.
+- [x] Track retrieved documents as evidence with origin, version/hash, declared
+      completeness and privacy; procedures are not evidence and metadata queries
+      do not establish complete reads. Internal context is not public corroboration.
+- [x] Show pending approval separately from queued/applied steering. Context changes
+      require pausing; approval queues a replan for explicit resume. Grants and
+      parent checkpoints preserve the audit trail; revisions require new grants.
+- [x] Test malicious source/skill instructions, missing or changed bindings, revoked
+      permissions, resume from another project, partial documents, cancellation,
+      immutable captures and external-disclosure boundaries. Production adapters
+      still require their own scope/transport contract tests and explicit approval.
 
 ### M4 — Investigation depth and auditing
 

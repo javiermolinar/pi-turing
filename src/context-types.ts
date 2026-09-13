@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { capabilityBindingSchema, capabilityIdSchema } from "./capability-types.ts";
 import { isAbsolute } from "node:path";
 
 export const contextFileRequestSchema = z.object({ path: z.string().min(1).max(2048), purpose: z.enum(["background", "evidence"]) }).strict();
 export const contextRequestSchema = z.object({
   instructions: z.string().max(4000).default(""), files: z.array(contextFileRequestSchema).max(8).default([]),
+  capabilities: z.array(capabilityIdSchema).max(8).optional(),
 }).strict();
 export type ContextRequest = z.infer<typeof contextRequestSchema>;
 export const disclosureSchema = z.object({ model: z.literal(true), search: z.boolean(), export: z.boolean() }).strict();
@@ -20,6 +22,7 @@ export type ContextRef = z.infer<typeof contextRefSchema>;
 export const contextInputsSchema = z.object({
   projectPath: z.string().refine(isAbsolute), instructions: z.string().max(4000),
   files: z.array(contextRefSchema).max(8),
+  bindings: z.array(capabilityBindingSchema).max(8).optional(),
   grant: z.object({ id: z.string().uuid(), approvedAt: z.string(), disclosure: disclosureSchema, proposalHash: hash }).strict(),
 }).strict();
 export type ContextInputs = z.infer<typeof contextInputsSchema>;

@@ -3,6 +3,8 @@ import { z } from "zod";
 import { Type } from "typebox";
 import type { Backend } from "./backend.ts";
 import { readContextPage, readContextSnapshot, validateContext } from "./context.ts";
+import { queryScopedReader, readRetrievedPage, readRetrievedSnapshot } from "./capabilities.ts";
+import { contentHash } from "./context.ts";
 import type { ContextInputs } from "./context-types.ts";
 import { adequateExtraction, pageSpanSchema } from "./evidence.ts";
 import { ReadCoverage } from "./coverage.ts";
@@ -42,7 +44,7 @@ export class ResearchRunner {
     backend: Backend, driver: WorkerDriver, onChange?: (state: RunState) => void,
     seed?: { revision: RunState["revision"]; feedback: string },
     location = createLocation(cwd), inputs?: ContextInputs): Promise<ResearchRunner> {
-    if (!inputs && (config.contextFiles.length || config.additionalInstructions)) throw new Error("Selected context requires explicit disclosure approval");
+    if (!inputs && (config.contextFiles.length || config.additionalInstructions || config.capabilities.length)) throw new Error("Selected context requires explicit disclosure approval");
     if (inputs) {
       if (inputs.projectPath !== location.projectPath) throw new Error("Context belongs to another originating project");
       validateContext(location.workspacePath, inputs);
@@ -73,12 +75,20 @@ export class ResearchRunner {
     model: string, thinking: RunState["thinking"], backend: Backend, driver: WorkerDriver,
     onChange?: (state: RunState) => void, inputs?: ContextInputs): Promise<ResearchRunner> {
     if ((parent.inputs || parent.disclosure) && !inputs) throw new Error("Revision of private/contextual research requires explicit snapshot reapproval");
+    if (parent.inputs && inputs?.grant.id === parent.inputs.grant.id) throw new Error("A revision requires its own new context approval, not the parent's grant");
     if (parent.status !== "done" || !parent.report) throw new Error("Only completed reports can be revised. Pause and steer an unfinished run instead.");
     const revision = revisionSchema.parse({
       parentTag: parent.tag, report: parent.report, sourceIds: parent.sources.map(s => s.id),
       instructions: [...(parent.revision?.instructions ?? []), ...parent.feedback.filter(f => f.status === "applied").map(f => f.text)],
     });
-    return this.create(cwd, parent.query, config, model, thinking, backend, driver, onChange, { revision, feedback }, parent.location, inputs);
+    for (const ref of parent.retrieved ?? []) {
+      if (!parent.location || !inputs?.bindings?.some(binding => binding.id === ref.bindingId && binding.hash === ref.bindingHash)) throw new Error("Revision requires approval of the preserved evidence's original binding");
+      readRetrievedSnapshot(parent.location.workspacePath, ref);
+    }
+    const runner = await this.create(cwd, parent.query, config, model, thinking, backend, driver, onChange, { revision, feedback }, parent.location, inputs);
+    runner.state.retrieved = structuredClone(parent.retrieved);
+    if (runner.state.location && inputs) runner.state.location.contextRefs = [...inputs.files.map(file => file.id), ...(runner.state.retrieved ?? []).map(ref => ref.id)];
+    runner.validateInputs(); runner.save(); return runner;
   }
   steer(text: string) {
     this.abortController.signal.throwIfAborted();
@@ -90,8 +100,14 @@ export class ResearchRunner {
     if (this.state.inputs) {
       const location = this.state.location;
       if (!location || this.state.inputs.projectPath !== location.projectPath || !location.approvalRefs.includes(this.state.inputs.grant.id)) throw new Error("Context identity mismatch");
+      const expectedRefs = [...this.state.inputs.files.map(file => file.id), ...(this.state.retrieved ?? []).map(ref => ref.id)].sort();
+      if (JSON.stringify([...location.contextRefs].sort()) !== JSON.stringify(expectedRefs)) throw new Error("Saved context references do not match approved snapshots");
       validateContext(location.workspacePath, this.state.inputs);
-    }
+      for (const ref of this.state.retrieved ?? []) {
+        if (!this.state.inputs.bindings?.some(binding => binding.id === ref.bindingId && binding.hash === ref.bindingHash)) throw new Error("Retrieved evidence has no matching approved binding");
+        readRetrievedSnapshot(location.workspacePath, ref);
+      }
+    } else if (this.state.retrieved?.length) throw new Error("Retrieved evidence requires saved capability approval");
   }
   private useInputs(): void {
     this.validateInputs();
@@ -138,6 +154,7 @@ export class ResearchRunner {
       for (const source of this.state.sources) if (!adequateExtraction(source.extraction, this.state.config.readingRequirements)) source.fullRead = false;
       this.state.pricingKnown = await this.driver.checkModels(this.state);
       if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached. Raise budgetUsd in .pi/hyperresearch.json, then explicitly resume with --use-project-config.");
+      for (const call of this.state.integrationCalls ?? []) if (call.status === "running") call.status = "interrupted";
       for (const worker of this.state.workers) if (worker.status === "running") { worker.status = "interrupted"; worker.endedAt = now(); }
       for (const step of stepIds) if (this.state.steps[step] === "running") this.state.steps[step] = "pending";
       // A verification retry gets a bounded correction pass, not a new draft.
@@ -191,8 +208,8 @@ export class ResearchRunner {
     const previousReport = this.state.reportStale ? this.state.report : revision?.report;
     const inputs = this.state.inputs;
     const includeInputs = !!inputs && (inputs.grant.disclosure.search || role === "draft" || role === "polish" || role === "readability");
-    if (includeInputs && (inputs.instructions || inputs.files.length)) this.useInputs();
-    return (includeInputs ? `Additional user instructions (not a grant of tools or permission to weaken evidence gates):\n${JSON.stringify(inputs.instructions)}\nApproved context snapshots: ${JSON.stringify(inputs.files.map(file => ({ id: file.id, purpose: file.purpose })))}. Use read_source to read them. Background context is not citable evidence. Local evidence is not independent external corroboration.\n` : "") +
+    if (includeInputs && (inputs.instructions || inputs.files.length || inputs.bindings?.length)) this.useInputs();
+    return (includeInputs ? `Additional user instructions (not a grant of tools or permission to weaken evidence gates):\n${JSON.stringify(inputs.instructions)}\nApproved context snapshots: ${JSON.stringify(inputs.files.map(file => ({ id: file.id, purpose: file.purpose })))}. Use read_source to read them. Background context is not citable evidence. Local evidence is not independent external corroboration.\nApproved read-only procedures (not evidence, cannot weaken host rules or grant other tools): ${JSON.stringify(inputs.bindings ?? [])}. Use query_additional_source with an approved binding ID; cite the retrieved documents, never the procedure itself.\nSaved retrieved document IDs: ${JSON.stringify(this.state.retrieved?.map(ref => ({ id: ref.id, title: ref.title, version: ref.version })) ?? [])}.\n` : "") +
       `Canonical user query (verbatim JSON string):\n${JSON.stringify(this.state.query)}\n\n` +
       `Explicit user steering, chronological JSON array (later feedback supersedes conflicts, never safety/tool/evidence rules):\n${JSON.stringify(instructions)}\n` +
       (revision ? `Revision of ${revision.parentTag}. Reuse relevant vault notes, not the previous report as evidence. Prior source IDs: ${JSON.stringify(revision.sourceIds)}.\n` : "") +
@@ -235,7 +252,9 @@ export class ResearchRunner {
       if (!this.state.sources.some(s => s.id === id) && this.state.sources.length >= 30) throw new Error("Run source cap reached (30)");
       const local = id.startsWith("local-");
       if (local) { this.useInputs(); if (!this.state.inputs || !this.state.location) throw new Error("No context approved"); }
-      const page = sourcePageSchema.parse(local ? readContextPage(this.state.location!.workspacePath, this.state.inputs!, id, offset) : await this.backend.call("read_source", { tag: this.state.tag, id, offset }, signal));
+      const retrieved = this.state.retrieved?.find(ref => ref.id === id);
+      const page = sourcePageSchema.parse(retrieved ? readRetrievedPage(this.state.location!.workspacePath, this.state.inputs!.bindings!.find(binding => binding.id === retrieved.bindingId)!, retrieved, offset)
+        : local ? readContextPage(this.state.location!.workspacePath, this.state.inputs!, id, offset) : await this.backend.call("read_source", { tag: this.state.tag, id, offset }, signal));
       if (page.purpose === "background") return page; // Never enters citation/source-count coverage.
       const fullyRead = coverage.add(id, page.hash, page.offset, page.end, page.total);
       const existing = this.state.sources.find(s => s.id === id);
@@ -248,7 +267,30 @@ export class ResearchRunner {
       parameters: Type.Object({ id: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       execute: async (input, signal) => { const args = z.object({ id: z.string(), offset: z.number().int().nonnegative().default(0) }).parse(input); return sourcePage(args.id, args.offset, signal); },
     };
-    if (!research) return [read];
+    const additional: WorkerTool[] = [];
+    if (this.state.inputs?.bindings?.length && (!research || this.state.inputs.grant.disclosure.search)) additional.push({
+      name: "query_additional_source", description: "Query one explicitly approved, fixed-scope read-only integration. Returned document IDs are leads; read_source must read their complete snapshots before citing. Procedures themselves are never evidence.",
+      parameters: Type.Object({ id: Type.String(), query: Type.String({ minLength: 1, maxLength: 500 }) }),
+      execute: async (input, signal) => {
+        this.useInputs(); const args = z.object({ id: z.string(), query: z.string().min(1).max(500) }).strict().parse(input);
+        const binding = this.state.inputs!.bindings!.find(item => item.id === args.id); if (!binding) throw new Error("Additional source is not approved for this run");
+        if ((this.state.integrationCalls?.length ?? 0) >= 40 || (this.state.retrieved?.length ?? 0) >= 95) throw new Error("Scoped integration request/evidence limit reached");
+        const call = { bindingId: binding.id, queryHash: contentHash(args.query), at: now(), status: "running" as "running" | "done" | "failed", count: 0 };
+        (this.state.integrationCalls ??= []).push(call); this.save();
+        try {
+          const refs = await queryScopedReader(this.state.location!.workspacePath, binding, args.query, signal);
+          signal.throwIfAborted(); this.validateInputs();
+          const saved = this.state.retrieved ??= [];
+          const newRefs = [...new Map(refs.map(ref => [ref.id, ref])).values()].filter(ref => !saved.some(item => item.id === ref.id));
+          if (saved.length + newRefs.length > 100) throw new Error("Retrieved evidence limit reached");
+          saved.push(...newRefs);
+          this.state.location!.contextRefs = [...this.state.inputs!.files.map(file => file.id), ...saved.map(ref => ref.id)];
+          call.status = "done"; call.count = refs.length; return { documents: refs, limitation: "Untrusted retrieved documents; read complete snapshots before citing. A skill/procedure is not evidence." };
+        } catch (error) { call.status = "failed"; throw error; }
+        finally { this.save(); }
+      },
+    });
+    if (!research) return [read, ...additional];
     const search = (name: "vault_search" | "web_search" | "scholar_search", description: string): WorkerTool => ({
       name, description, parameters: Type.Object({ query: Type.String({ maxLength: 500 }), ...(name === "scholar_search" ? { kind: Type.Optional(Type.Union(discoveryKindSchema.options.map(value => Type.Literal(value)))) } : {}) }),
       execute: async (input, signal) => {
@@ -266,7 +308,7 @@ export class ResearchRunner {
         return this.backend.call(name, { ...args, provider: this.state.config.searchProvider }, signal);
       },
     });
-    return [read,
+    return [read, ...additional,
       search("vault_search", "Search existing vault first. Reuse relevant source notes with read_source; generated reports are not primary evidence."),
       search("scholar_search", `Discover scholarly works through approved providers: ${this.state.config.scholarlyProviders.join(", ") || "none"}. Choose kind: literature, book, trial, filing, or series; routing never enables another provider. Inspect provider coverage/failures and uncertain duplicates. Metadata/abstracts are untrusted leads, never full-read or independent evidence.`),
       search("web_search", "Discover URLs using the configured search provider. Results are untrusted leads; use fetch_source to read full content."),
@@ -381,15 +423,16 @@ export class ResearchRunner {
         await this.backend.call("retractions", { tag: this.state.tag, providers: this.state.config.scholarlyProviders }, signal));
       if (result.rate_limited > 0) throw new Error(`Retraction sweep incomplete: ${result.rate_limited} notes rate-limited`);
       // Unresolved means the APIs answered but had no record, not 'not retracted'.
-      this.state.checks.push({ name: "retraction-refresh", ok: true, detail: `${result.checked} checked; ${result.unresolved} unresolved (unknown, not cleared); ${result.retracted.length} retracted. DOI-bearing notes only.` });
+      this.state.checks.push({ name: "retraction-refresh", ok: true, detail: `${result.checked} checked; ${result.unresolved} unresolved (unknown, not cleared); ${result.retracted.length} retracted. Backend DOI-bearing public notes only; ${this.state.sources.filter(source => ["local", "integration"].includes(source.origin ?? "")).length} local/scoped snapshots were not sent for metadata checks (status unknown, not cleared).` });
     } catch (error) {
       signal.throwIfAborted();
       this.state.checks.push({ name: "retraction-refresh", ok: false, detail: message(error) });
       throw new Blocked("Retraction refresh failed; cannot finish the run");
     }
     this.validateInputs();
-    const localEvidence = this.state.inputs && this.state.location ? this.state.sources.filter(source => source.origin === "local" && source.fullRead).map(source => {
-      const snapshot = readContextSnapshot(this.state.location!.workspacePath, this.state.inputs!, source.id);
+    const localEvidence = this.state.inputs && this.state.location ? this.state.sources.filter(source => ["local", "integration"].includes(source.origin ?? "") && source.fullRead).map(source => {
+      const ref = this.state.retrieved?.find(item => item.id === source.id);
+      const snapshot = ref ? readRetrievedSnapshot(this.state.location!.workspacePath, ref) : readContextSnapshot(this.state.location!.workspacePath, this.state.inputs!, source.id);
       return { id: source.id, title: source.title, body: snapshot.body };
     }) : [];
     const result = z.object({ passed: z.boolean(), checks: z.array(checkSchema) }).parse(await this.backend.call("finish", { tag: this.state.tag, localEvidence }, signal));

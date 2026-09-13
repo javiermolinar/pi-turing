@@ -239,7 +239,19 @@ approval; non-interactive launches with context fail before model work.
   grant is not silently restored; start a new run to approve a new context selection.
 
 Freeform instructions do not grant new skills, integrations, shell access, or file
-permissions. Scoped integration adapters are the next implementation slice.
+permissions. Select explicitly registered read-only readers in the same flow or
+propose their IDs with `capabilities` in project preferences. Definitions, versions,
+scopes, implementation hashes and credential references are saved for approval;
+missing, changed or revoked bindings block further model work. A procedure is not
+evidence: workers must read the underlying document snapshots before citing them.
+See [INTEGRATIONS.md](INTEGRATIONS.md) for the shipped explicit-file-collection
+reader and the contract for existing CLI/API integrations. No production connector
+is enabled by default.
+
+Export permissions govern built-in save/download actions, not copying by an
+authorized viewer. Anyone with a report-view token can read and copy its visible
+text; share tokens only with authorized recipients. Private/scoped report paths
+are not automatically handed to the parent chat model for reading.
 
 ## Scholarly discovery
 

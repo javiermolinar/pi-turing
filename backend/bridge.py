@@ -141,7 +141,7 @@ def cleanup_local_views(vault):
     if journal.stat().st_size > 10_000 or vault.notes_dir.is_symlink():
         raise ValueError("Unsafe local-view state")
     entries = json.loads(journal.read_text())
-    if not isinstance(entries, list) or len(entries) > 8:
+    if not isinstance(entries, list) or len(entries) > 30:
         raise ValueError("Invalid local-view journal")
     from hyperresearch.core.note import read_note
     targets = []
@@ -165,7 +165,7 @@ def cleanup_local_views(vault):
 def finish_with_local_evidence(vault, tag, evidence):
     from hyperresearch.core import runs
     from hyperresearch.core.note import write_note
-    if not isinstance(evidence, list) or len(evidence) > 8:
+    if not isinstance(evidence, list) or len(evidence) > 30:
         raise ValueError("Invalid local evidence")
     prepared = []
     for item in evidence:
@@ -176,7 +176,7 @@ def finish_with_local_evidence(vault, tag, evidence):
             raise ValueError("Local evidence view collision")
         body = "<!-- pi-local-evidence-view: not public corroboration -->\n\n" + item["body"].strip()
         prepared.append({**item, "body": body})
-    if len({item["id"] for item in prepared}) != len(prepared) or sum(len(item["body"].encode()) for item in prepared) > 510_000:
+    if len({item["id"] for item in prepared}) != len(prepared) or sum(len(item["body"].encode()) for item in prepared) > 3_510_000:
         raise ValueError("Duplicate or oversized local evidence")
     if not prepared:
         vault.auto_sync()
@@ -326,7 +326,10 @@ def dispatch(action: str, args: dict):
 
 if __name__ == "__main__":
     try:
-        request = json.loads(sys.stdin.read(1_000_000))
+        payload = sys.stdin.read(8_000_001)
+        if len(payload) > 8_000_000:
+            raise ValueError("Backend input exceeds limit")
+        request = json.loads(payload)
         result = dispatch(request["action"], request.get("args", {}))
         print(json.dumps({"ok": True, "data": result}, default=str))
     except Exception as exc:

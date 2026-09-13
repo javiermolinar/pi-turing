@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAbsolute } from "node:path";
+import { capabilityIdSchema, retrievedRefSchema } from "./capability-types.ts";
 import { contextFileRequestSchema, contextInputsSchema } from "./context-types.ts";
 import { extractionSchema, readingRequirementSchema } from "./evidence.ts";
 import { searchProviderSchema } from "./search.ts";
@@ -14,6 +15,7 @@ export const roles = ["decompose", "research", "draft", "polish", "readability"]
 export type Role = typeof roles[number];
 export const thinkingSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const configSchema = z.object({
+  capabilities: z.array(capabilityIdSchema).max(8).default([]),
   contextFiles: z.array(contextFileRequestSchema).max(8).default([]),
   additionalInstructions: z.string().max(4000).default(""),
   searchProvider: searchProviderSchema.default("brave"),
@@ -47,6 +49,7 @@ export type Check = z.infer<typeof checkSchema>;
 export const sourceSchema = z.object({
   id: z.string(), title: z.string(), url: z.string(), words: z.number(),
   origin: z.enum(["public", "local", "integration"]).optional(),
+  integration: z.object({ bindingId: capabilityIdSchema, bindingHash: z.string(), uri: z.string().max(2048), version: z.string().max(150).optional(), visibility: z.enum(["private", "public"]) }).strict().optional(),
   purpose: z.enum(["background", "evidence"]).optional(),
   retrievedAt: z.string().optional(), contentHash: z.string().optional(), fullRead: z.boolean().default(false),
   extraction: extractionSchema.optional(),
@@ -79,9 +82,11 @@ export const stateSchema = z.object({
   location: z.object({
     projectPath: z.string().refine(isAbsolute), dataRoot: z.string().refine(isAbsolute),
     workspaceId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/), workspacePath: z.string().refine(isAbsolute),
-    contextRefs: z.array(z.string()).max(100), approvalRefs: z.array(z.string()).max(20),
+    contextRefs: z.array(z.string()).max(128), approvalRefs: z.array(z.string()).max(20),
   }).strict().optional(),
   inputs: contextInputsSchema.optional(),
+  retrieved: z.array(retrievedRefSchema).max(100).optional(),
+  integrationCalls: z.array(z.object({ bindingId: capabilityIdSchema, queryHash: z.string(), at: z.string(), status: z.enum(["running", "done", "failed", "interrupted"]), count: z.number().int().nonnegative().optional() }).strict()).max(40).optional(),
   disclosure: z.object({ searchBlocked: z.boolean(), exportBlocked: z.boolean() }).strict().optional(),
   query: z.string().min(1).max(30_000),
   profile: z.literal("light"),

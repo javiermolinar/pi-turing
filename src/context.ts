@@ -2,6 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants, closeSync, existsSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
+import { rejectSecrets } from "./secrets.ts";
+import { resolveCapabilities, validateCapability } from "./capabilities.ts";
+import type { CapabilityBinding } from "./capability-types.ts";
 import { contextInputsSchema, contextRefSchema, contextRequestSchema, contextSnapshotSchema, disclosureSchema, type ContextInputs, type ContextRequest, type Disclosure } from "./context-types.ts";
 import { privateDirectory, safePath } from "./paths.ts";
 import { untrustedBody } from "./evidence.ts";
@@ -9,10 +12,7 @@ import { untrustedBody } from "./evidence.ts";
 export const contentHash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const maxTotalBytes = 500_000;
 const forbidden = /^(?:\.git|\.pi|\.ssh|\.aws|\.azure|\.gnupg|\.config|\.hyperresearch|\.env(?:\..*)?|\.npmrc|\.netrc|id_rsa|id_ed25519|credentials?(?:\..*)?|secrets?(?:\..*)?|passwords?(?:\..*)?)$/i;
-export function rejectSecrets(text: string): void {
-  if (/\b(?:gh[pousr]_[a-zA-Z0-9]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b|\b[a-z][\w+.-]*:\/\/[^\s/:]+:[^\s@]{8,}@/i.test(text)) throw new Error("Possible credentials in selected context; redact the file before attaching it");
-  if (/-----BEGIN [^-\n]*(?:PRIVATE KEY|OPENSSH)[^-\n]*-----|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|\b(?:api[_-]?key|password|secret|access[_-]?token)["']?\s*[=:]\s*["']?[^\s"']{16,}/i.test(text)) throw new Error("Possible credentials in selected context; redact the file before attaching it");
-}
+export { rejectSecrets } from "./secrets.ts";
 function filePath(project: string, selected: string): string {
   if (/[\x00-\x1f\x7f]/.test(selected) || selected.split(/[\\/]/).includes("..")) throw new Error("Invalid context path or traversal");
   const path = resolve(project, selected); const rel = relative(project, path);
@@ -35,19 +35,27 @@ function readText(path: string, maxBytes = 200_000): string {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(data);
   } finally { closeSync(fd); }
 }
+export function readSelectedText(project: string, selected: string): { path: string; body: string } {
+  const requestedRoot = resolve(project); const root = realpathSync(project);
+  const local = isAbsolute(selected) && selected.startsWith(requestedRoot + sep) ? relative(requestedRoot, selected) : selected;
+  const path = filePath(root, local); const body = readText(path); rejectSecrets(body);
+  if (!body.trim()) throw new Error("Empty context text");
+  return { path, body };
+}
 export interface ContextPreview {
-  projectPath: string; instructions: string; files: { path: string; purpose: "background" | "evidence"; bytes: number; hash: string }[]; hash: string;
+  projectPath: string; instructions: string; files: { path: string; purpose: "background" | "evidence"; bytes: number; hash: string }[]; bindings: CapabilityBinding[]; hash: string;
 }
 export function previewContext(project: string, request: ContextRequest): ContextPreview {
   const parsed = contextRequestSchema.parse(request); const selectedProject = resolve(project); project = realpathSync(project); rejectSecrets(parsed.instructions);
   const files = parsed.files.map(file => {
     const selected = isAbsolute(file.path) && file.path.startsWith(selectedProject + sep) ? relative(selectedProject, file.path) : file.path;
-    const path = filePath(project, selected); const body = readText(path); rejectSecrets(body);
+    const { path, body } = readSelectedText(project, selected);
     return { path, purpose: file.purpose, bytes: Buffer.byteLength(body), hash: contentHash(body) };
   });
   if (new Set(files.map(file => file.path)).size !== files.length) throw new Error("Duplicate context paths");
   if (files.reduce((sum, file) => sum + file.bytes, 0) > maxTotalBytes) throw new Error("Context exceeds 500KB total limit");
-  const value = { projectPath: project, instructions: parsed.instructions, files };
+  const bindings = resolveCapabilities(parsed.capabilities ?? []);
+  const value = { projectPath: project, instructions: parsed.instructions, files, bindings };
   return { ...value, hash: contentHash(JSON.stringify(value)) };
 }
 function snapshotPath(workspace: string, id: string): string {
@@ -67,7 +75,7 @@ function saveApproval(workspace: string, input: Omit<ContextInputs, "grant">, pe
 /** Call only after separate user approval of model, search, and export disclosure. */
 export function approveContext(workspace: string, preview: ContextPreview, permissions: Disclosure): ContextInputs {
   disclosureSchema.parse(permissions);
-  const current = previewContext(preview.projectPath, { instructions: preview.instructions, files: preview.files.map(file => ({ path: file.path, purpose: file.purpose })) });
+  const current = previewContext(preview.projectPath, { instructions: preview.instructions, files: preview.files.map(file => ({ path: file.path, purpose: file.purpose })), capabilities: preview.bindings.map(binding => binding.id) });
   if (current.hash !== preview.hash) throw new Error("Context changed since preview; approve a fresh preview");
   privateDirectory(safePath(workspace, "context"));
   const files = current.files.map(file => {
@@ -84,7 +92,7 @@ export function approveContext(workspace: string, preview: ContextPreview, permi
     const { body: _body, ...reference } = snapshot;
     return contextRefSchema.parse(reference);
   });
-  return saveApproval(workspace, { projectPath: current.projectPath, instructions: current.instructions, files }, permissions, current.hash);
+  return saveApproval(workspace, { projectPath: current.projectPath, instructions: current.instructions, files, bindings: current.bindings }, permissions, current.hash);
 }
 export function readContextSnapshot(workspace: string, inputs: ContextInputs, id: string) {
   const ref = inputs.files.find(file => file.id === id); if (!ref) throw new Error("Context ID not approved for this run");
@@ -95,17 +103,18 @@ export function readContextSnapshot(workspace: string, inputs: ContextInputs, id
 }
 export function validateContextApproval(workspace: string, inputs: ContextInputs): void {
   contextInputsSchema.parse(inputs);
-  const approval = approvalSchema.parse(JSON.parse(readText(grantPath(workspace, inputs.grant.id), 100_000)));
+  const approval = approvalSchema.parse(JSON.parse(readText(grantPath(workspace, inputs.grant.id), 2_000_000)));
   if (approval.revokedAt || JSON.stringify(approval.inputs) !== JSON.stringify(inputs)) throw new Error("Context approval is revoked or changed; no model work may resume");
 }
 export function validateContext(workspace: string, inputs: ContextInputs): void {
   validateContextApproval(workspace, inputs);
+  for (const binding of inputs.bindings ?? []) validateCapability(binding);
   for (const ref of inputs.files) readContextSnapshot(workspace, inputs, ref.id);
 }
 export function reapproveContext(workspace: string, inputs: ContextInputs, permissions: Disclosure): ContextInputs {
   // Explicit revision reuse pins old snapshots, never rereads current project files.
   validateContext(workspace, inputs);
-  return saveApproval(workspace, { projectPath: inputs.projectPath, instructions: inputs.instructions, files: inputs.files }, permissions, inputs.grant.proposalHash);
+  return saveApproval(workspace, { projectPath: inputs.projectPath, instructions: inputs.instructions, files: inputs.files, bindings: inputs.bindings }, permissions, inputs.grant.proposalHash);
 }
 export function revokeContext(workspace: string, inputs: ContextInputs): void {
   validateContext(workspace, inputs);

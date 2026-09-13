@@ -58,7 +58,7 @@ test("dashboard escapes queries, source URLs, errors and report HTML", () => {
   assert.ok(html.includes('&lt;script&gt;'));
   assert.equal((html.match(/<script>/g) ?? []).length, 1);
   assert.ok(!html.includes('<img ')); assert.ok(!html.includes('<iframe '));
-  assert.ok(!html.includes('href="javascript:'));
+  assert.ok(!/<a\b[^>]*href="javascript:/i.test(html));
   assert.ok(html.includes("Content-Security-Policy"));
 });
 

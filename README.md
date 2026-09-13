@@ -1,9 +1,10 @@
 # pi-hyperresearch
 
-An experimental Pi-native runner for Hyperresearch's **light pipeline**, with a
-persistent source vault and a live, read-only web dashboard. The Python backend
-is reused for now; all backend calls live behind `src/backend.ts` so it can be
-replaced with TypeScript later.
+An experimental Pi-native adaptation of [Hyperresearch](https://github.com/jordan-gibbs/hyperresearch)'s
+research capabilities. The **light pipeline** runs today, with central private
+working state, a Pi run picker, and a read-only web application. The Python backend
+is a temporary adapter, not the product's storage architecture. The final planned
+phase replaces it with TypeScript; upstream knowledge-base workflows stay out of scope.
 
 **Implemented:** decompose → parallel width sweep → single draft → bounded polish
 → readability audit → verification. Upstream stage numbers (1, 2, 10, 15, 16) are
@@ -19,10 +20,11 @@ that a report is factually correct.
 See [PLAN.md](PLAN.md) for first-class investigation, broader scholarly discovery,
 full-text/PDF reading, local context, and portable report delivery behind a smaller
 Pi interface. Storage is composed, with optional destinations such as Lumbrera—not
-a separate knowledge product to rebuild. These are planned features, not current
-behavior. The plan includes central run storage, Pi/web run selection, grep-like
-cross-run report search, approved knowledge-base/skill instructions, shared web
-assets, and a phased implementation checklist.
+a separate knowledge product to rebuild. Central runs, explicit migration, Pi/web
+selection, literal report search, shared web assets, and portable exports are now
+implemented. Broader scholarly investigation, approved context/integrations,
+deeper research, and the final Python-to-TypeScript migration remain on the roadmap.
+Research parity is a target, not an established result.
 
 ## Try it
 
@@ -210,8 +212,8 @@ lists central runs directly, and `/hyperresearch help` retains command documenta
 View is read-only. Resume and Revise require explicit cost confirmation in the UI.
 Steer/Pause/Cancel appear only for this session's active runner. Saved `running`
 status is not ownership; external writer locks and missing workspaces disable paid
-actions. Corrupt checkpoints remain visible as unavailable entries. Export/save
-actions follow in the report-delivery slice.
+actions. Corrupt checkpoints remain visible as unavailable entries. Drafts and
+completed reports expose Export Markdown and Save report… without starting workers.
 
 ## Dashboard
 
@@ -258,6 +260,33 @@ viewer when opened outside the dashboard.
 The token URL is a local capability: anyone with it while the server is running
 can read that run. Snapshots contain research queries, URLs and report content;
 review them before sharing.
+
+## Portable delivery
+
+The web report offers **Export Markdown** and **Export HTML**. Downloads are
+browser-managed; the web server never writes to an arbitrary host path. Exported
+HTML embeds the shared application and selected report, works offline, and can
+also download its embedded Markdown without a server.
+
+Known wiki citations and source-note links become standard Markdown links through
+the saved source map. LaTeX and code remain intact. Unknown, unsafe and local
+references are marked rather than assigned guessed URLs. Local source material,
+attachments and remote images are not bundled. Draft/stale status and light-mode
+audit limitations remain visible; review report content for sensitivity before sharing.
+
+In Pi, select **Save report…**, or use a literal path (spaces allowed; no shell quoting):
+
+```text
+/hyperresearch save <tag> /chosen/folder/report.md
+/hyperresearch export <tag>       # Open browser-managed Markdown download
+```
+
+The folder must exist. Saves refuse symlinks, managed run state and protected paths.
+Existing files need overwrite confirmation; noninteractive commands require
+`save --overwrite <tag> <path.md>`. Writes publish atomically and refuse targets
+changed since approval. Resume never updates the exported copy. New revision IDs
+produce distinct suggested filenames; choosing the same destination still requires
+explicit overwrite approval.
 
 ## State and recovery
 

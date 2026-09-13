@@ -1,7 +1,7 @@
 // Deterministic browser smoke test and screenshots. No model calls or external pages.
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { startDashboard } from "../src/server.ts";
@@ -81,6 +81,10 @@ try {
   await page.screenshot({ path: resolve(output, "dashboard-mobile.png"), fullPage: true });
   await page.locator('.report').screenshot({ path: resolve(output, 'report-mobile.png') });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  const htmlDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export HTML', exact: true }).click();
+  const htmlDownload = await htmlDownloadPromise;
+  const exportedHtml = resolve(output, 'dashboard-export.html'); await htmlDownload.saveAs(exportedHtml);
   state.status = 'running'; server.publish(state, false);
   await page.getByText('Saved research activity', { exact: true }).waitFor();
   assert.equal(await page.locator('.run-spinner.is-active').count(), 0);
@@ -89,12 +93,18 @@ try {
   await server.close();
   await page.waitForFunction(() => document.getElementById("connection")?.textContent?.includes("Disconnected"));
   assert.equal(await page.locator('.run-spinner').evaluate(el => getComputedStyle(el).animationPlayState), 'paused');
-  await page.goto(pathToFileURL(snapshot).href);
+  await page.goto(pathToFileURL(exportedHtml).href);
   assert.equal(await page.locator('.run-spinner.is-active').count(), 0);
   assert.ok(await page.getByText("Offline snapshot", { exact: false }).isVisible());
   assert.ok(!await page.evaluate(() => (window as any).hacked));
   assert.equal(await page.locator('.report math[display="block"]').count(), 2);
-  assert.equal(await page.locator('.report a.citation').getAttribute('href'), state.sources[0].url);
+  assert.equal(await page.locator('.report a').filter({ hasText: /^1$/ }).first().getAttribute('href'), state.sources[0].url);
+  const markdownPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export Markdown', exact: true }).click();
+  const markdown = await markdownPromise; const exportedMd = resolve(output, 'report-export.md'); await markdown.saveAs(exportedMd);
+  const portable = readFileSync(exportedMd, 'utf8');
+  assert.ok(portable.includes('STALE DRAFT')); assert.ok(portable.includes(String.raw`\partial_t u`));
+  assert.ok(!portable.includes('[[sqlite-wal]]')); assert.ok(portable.includes(state.sources[0].url));
   assert.ok(requests.every(url => url.startsWith("http://127.0.0.1:") || url.startsWith("file://")), requests.join("\n"));
   console.log(`Browser smoke test passed. Screenshots: ${output}`);
 } finally { await browser.close(); await server.close(); }

@@ -16,6 +16,7 @@ import { createLocation, dataRoot, requireLocation } from "../src/paths.ts";
 import { lockDataRoot, lockWorkspace, writerLocked } from "../src/locks.ts";
 import { migrateLegacy, previewMigration, rollbackMigration } from "../src/migration.ts";
 import { pickerRows, RunPicker, runActions } from "../src/picker.ts";
+import { portableMarkdown, prepareSave, saveMarkdown } from "../src/export.ts";
 import { cleanTerminal, configSchema, feedbackTextSchema, message, type RunState } from "../src/types.ts";
 import { PiWorkerDriver } from "../src/worker.ts";
 
@@ -32,7 +33,9 @@ const help = `Hyperresearch — light pipeline (experimental)
 /hyperresearch cancel            Abort; keep artifacts
 /hyperresearch dashboard [tag]   Open a run-scoped localhost dashboard
 /hyperresearch dashboard all     Open central inventory (broader read access)
-/hyperresearch snapshot [tag]    Open saved standalone HTML
+/hyperresearch snapshot [tag]    Generate/open standalone HTML
+/hyperresearch export [tag]      Browser-managed Markdown download
+/hyperresearch save [--overwrite] <tag> <path.md>  Save a portable report
 /hyperresearch setup             Install the pinned backend with uv
 /hyperresearch migrate [apply]   Preview/copy this checkout's legacy runs
 /hyperresearch migrate rollback <id>  Roll back an unchanged migration
@@ -98,6 +101,16 @@ export default function hyperresearch(pi: ExtensionAPI) {
     try { await execute(command, [url], { cwd: ctx.cwd, timeoutMs: 10_000, signal: lifecycle.signal }); }
     catch { say(ctx, `Open this URL manually: ${url}`); }
   };
+  const saveReport = async (ctx: ExtensionContext, state: RunState, path?: string, overwrite = false) => {
+    const input = path ?? (ctx.hasUI ? await ctx.ui.input("Save report to .md path", join(ctx.cwd, `${state.tag}.md`)) : undefined);
+    if (!input) return;
+    const markdown = portableMarkdown(state);
+    const target = prepareSave(ctx.cwd, input, dataRoot());
+    const approved = target.existingHash ? (ctx.hasUI ? await ctx.ui.confirm("Overwrite exported report?", `${target.path}\nThis replaces your existing copy. The preserved run is unchanged.`) : overwrite) : false;
+    if (target.existingHash && !approved) { say(ctx, "Save cancelled: overwrite not approved. Non-interactive saves require --overwrite."); return; }
+    saveMarkdown(target, markdown, approved);
+    say(ctx, `Report saved: ${target.path}. This is a copy; verification status is included.`);
+  };
   function launch(ctx: ExtensionContext, query?: string, resumeTag?: string, revision?: { tag: string; feedback: string }, useProjectConfig = false): Promise<void> {
     if (active || launching) return Promise.reject(new Error("A run is already active. Pause or cancel it first."));
     startup = launchInner(ctx, query, resumeTag, revision, useProjectConfig);
@@ -162,7 +175,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
 
   pi.registerCommand("hyperresearch", {
     description: "Research with a persistent vault and live/offline HTML dashboard",
-    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup", "migrate", "list", "help"]
+    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup", "migrate", "list", "export", "save", "help"]
       .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
     handler: async function handleCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
       try {
@@ -195,6 +208,8 @@ export default function hyperresearch(pi: ExtensionAPI) {
           const action = await ctx.ui.select(cleanTerminal(`${state.query}\n${state.tag} · ${state.status} · ${state.location?.projectPath ?? "Legacy"}`), runActions(state, ownership, workspaceAvailable));
           if (!action) return;
           if (action === "View") await handleCommand(`dashboard ${state.tag}`, ctx);
+          else if (action === "Export Markdown") await handleCommand(`export ${state.tag}`, ctx);
+          else if (action === "Save report…") await saveReport(ctx, state);
           else if (action === "Resume") await launch(ctx, undefined, state.tag);
           else if (action === "Revise") {
             const feedback = await ctx.ui.input("Revision instructions (parent report preserved)");
@@ -204,6 +219,12 @@ export default function hyperresearch(pi: ExtensionAPI) {
             if (feedback?.trim()) await handleCommand(`steer ${feedback}`, ctx);
           } else await handleCommand(action.toLowerCase(), ctx);
           return;
+        }
+        if (command === "save") {
+          trusted(ctx);
+          const match = /^save\s+(?:(--overwrite)\s+)?(\S+)\s+([\s\S]+)$/.exec(input);
+          if (!match) throw new Error("Usage: save [--overwrite] <tag> <literal path.md>");
+          await saveReport(ctx, resolveState(ctx, match[2]), match[3], !!match[1]); return;
         }
         if (command === "migrate") {
           trusted(ctx);
@@ -263,7 +284,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
           if (!active) { say(ctx, "No active run"); return; }
           active.stop(command === "pause" ? "paused" : "aborted"); await task; return;
         }
-        if (["status", "dashboard", "snapshot"].includes(command)) {
+        if (["status", "dashboard", "snapshot", "export"].includes(command)) {
           trusted(ctx);
           if (command === "dashboard" && argument === "all") {
             if (dashboardOpening) throw new Error("Dashboard is already opening");
@@ -287,7 +308,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
               await dashboard?.close(); dashboard = await startDashboard(state, active?.state.tag === state.tag); dashboardTag = state.tag;
             }
             if (lifecycle.signal.aborted) { await dashboard.close(); dashboard = undefined; return; }
-            show(state, ctx); await open(dashboard.url, ctx);
+            show(state, ctx); await open(command === "export" ? new URL("markdown", dashboard.url).href : dashboard.url, ctx);
           })();
           try { await dashboardOpening; } finally { dashboardOpening = undefined; }
           return;

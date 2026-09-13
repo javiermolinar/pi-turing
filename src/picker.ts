@@ -16,9 +16,9 @@ export function pickerRows(inventory: Inventory, activeTag?: string): PickerRow[
       details: [cleanTerminal(issue.error), "No actions will start for an unreadable checkpoint."] })),
   ];
 }
-export type RunAction = "View" | "Resume" | "Revise" | "Steer" | "Pause" | "Cancel";
+export type RunAction = "View" | "Export Markdown" | "Save report…" | "Resume" | "Revise" | "Steer" | "Pause" | "Cancel";
 export function runActions(state: RunState, ownership: "session" | "external" | "saved", workspaceAvailable: boolean): RunAction[] {
-  const actions: RunAction[] = ["View"];
+  const actions: RunAction[] = state.report !== undefined ? ["View", "Export Markdown", "Save report…"] : ["View"];
   if (ownership === "session") return [...actions, "Steer", "Pause", "Cancel"];
   if (ownership === "external" || !workspaceAvailable) return actions;
   if (state.status === "done" && state.report) actions.push("Revise");

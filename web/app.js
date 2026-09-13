@@ -30,6 +30,7 @@ function switchAway() {
   document.body.dataset.connected = 'false';
 }
 function renderSnapshot(data) {
+  byId('export-markdown').disabled = !data.hasReport; byId('export-html').disabled = !data.hasReport;
   // Only host-rendered, sanitized HTML comes from the capability's endpoint.
   byId('main').innerHTML = data.html;
   if (data.location) {
@@ -57,7 +58,8 @@ function connect(tag, epoch, line) {
 }
 async function selectRun(tag, line, push = true) {
   switchAway(); selected = tag; const epoch = generation;
-  byId('inventory').hidden = true; byId('main').hidden = false; sourceFilter.hidden = false;
+  byId('inventory').hidden = true; byId('main').hidden = false; sourceFilter.hidden = false; byId('export-markdown').hidden = false; byId('export-html').hidden = false;
+  byId('export-markdown').disabled = true; byId('export-html').disabled = true;
   // Never leave the previous run visible while a new selection loads/fails.
   byId('main').textContent = 'Loading selected investigation…'; statusEl.textContent = 'Loading…';
   loading = new AbortController();
@@ -90,7 +92,7 @@ function renderRuns() {
 }
 async function showInventory(push = true) {
   switchAway(); selected = ''; const epoch = generation;
-  byId('main').hidden = true; byId('inventory').hidden = false; sourceFilter.hidden = true;
+  byId('main').hidden = true; byId('inventory').hidden = false; sourceFilter.hidden = true; byId('export-markdown').hidden = true; byId('export-html').hidden = true;
   if (push) { history.pushState(null, '', base); lastNavigation = location.pathname + location.search; }
   statusEl.textContent = 'Saved investigations · read-only';
   loading = new AbortController();
@@ -119,6 +121,23 @@ async function search() {
   } catch (error) { if (epoch === searchGeneration) byId('search-status').textContent = error.name === 'AbortError' ? 'Search cancelled.' : error.message; }
   finally { if (epoch === searchGeneration) byId('cancel-search').hidden = true; }
 }
+async function download(kind) {
+  const tag = selected;
+  try {
+    let blob;
+    if (live) {
+      const url = new URL(kind === 'md' ? 'markdown' : 'html', base); url.searchParams.set('id', tag);
+      const response = await fetch(url); if (!response.ok) throw new Error('Export unavailable'); blob = await response.blob();
+    } else {
+      const bytes = Uint8Array.from(atob(byId('markdown-data').content.textContent), character => character.charCodeAt(0));
+      blob = new Blob([bytes], { type: 'text/markdown;charset=utf-8' });
+    }
+    const href = URL.createObjectURL(blob); const anchor = document.createElement('a');
+    anchor.href = href; anchor.download = (tag || 'report') + '.' + kind; anchor.click(); setTimeout(() => URL.revokeObjectURL(href), 1000);
+  } catch (error) { statusEl.textContent = error.message; }
+}
+byId('export-markdown').addEventListener('click', () => download('md'));
+byId('export-html').addEventListener('click', () => download('html'));
 if (live) {
   byId('inventory-button').addEventListener('click', () => showInventory());
   byId('run-filter').addEventListener('input', renderRuns);

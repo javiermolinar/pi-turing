@@ -539,7 +539,7 @@ absent. Keep regression coverage for the working light pipeline throughout.
 - [x] Add New research, recent-run rows, filtering, keyboard navigation, and details.
 - [x] Expose status-appropriate actions with explicit confirmation of resumed paid
       work and proposed configuration changes (context changes remain unavailable).
-      Export/save actions follow in M1d.
+      Export/save actions are implemented in M1d.
 - [x] Test empty history, active/external/stale statuses, selection/cancel behavior,
       terminal widths, and preservation of the existing prompt.
 
@@ -562,15 +562,16 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ### M1d — Portable report delivery
 
-- [ ] Export known internal citations as standard Markdown links/footnotes, retain
+- [x] Export known internal citations as standard Markdown links/footnotes, retain
       LaTeX, source provenance, and draft/stale/verification limitations.
-- [ ] Add dashboard Export Markdown and explicit self-contained HTML export using
+- [x] Add dashboard Export Markdown and explicit self-contained HTML export using
       the shared assets; support Markdown download from exported HTML too.
-- [ ] Add Pi Save report… with safe path handling, overwrite confirmation, atomic
+- [x] Add Pi Save report… with safe path handling, overwrite confirmation, atomic
       writes, and separate revision outputs.
-- [ ] Keep local evidence/private attachments out of exports unless selected and
-      approved; label nonportable local references clearly.
-- [ ] Test offline exports, links/math, malicious markup, save failures, overwrite
+- [x] Exclude local evidence/private attachments from current exports and label
+      nonportable local references. Approved evidence bundles remain deferred until
+      local-file/integration consent is implemented in M3.
+- [x] Test offline exports, links/math, malicious markup, save failures, overwrite
       refusal, and preservation of user-edited exported copies.
 
 ### M2 — Scholarly investigation

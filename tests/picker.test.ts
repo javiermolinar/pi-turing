@@ -37,6 +37,6 @@ test("actions distinguish session ownership, external writers, stale running and
   assert.deepEqual(runActions(state, "saved", false), ["View"]);
   assert.deepEqual(runActions(state, "saved", true), ["View", "Resume"]);
   state.status = "done"; state.report = "Report";
-  assert.deepEqual(runActions(state, "saved", true), ["View", "Revise"]);
-  state.status = "aborted"; assert.deepEqual(runActions(state, "saved", true), ["View"]);
+  assert.deepEqual(runActions(state, "saved", true), ["View", "Export Markdown", "Save report…", "Revise"]);
+  state.status = "aborted"; assert.deepEqual(runActions(state, "saved", true), ["View", "Export Markdown", "Save report…"]);
 });

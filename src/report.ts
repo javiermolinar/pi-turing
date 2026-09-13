@@ -23,7 +23,7 @@ function isEscaped(text: string, index: number): boolean {
 }
 
 /** Recognize TeX before Markdown consumes backslash escapes. Never runs in code tokens. */
-function mathAt(source: string): { raw: string; text: string; display: boolean } | undefined {
+export function mathAt(source: string): { raw: string; text: string; display: boolean } | undefined {
   const delimiters = [["\\[", "\\]", true], ["$$", "$$", true], ["\\(", "\\)", false], ["$", "$", false]] as const;
   for (const [open, close, display] of delimiters) {
     if (!source.startsWith(open)) continue;

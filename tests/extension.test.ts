@@ -45,6 +45,24 @@ test("bare picker, list, status and denied cross-project resume never mutate che
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("Pi saves literal paths, confirms overwrites and preserves both concurrent edits and run state", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hpr-save-command-")); const output = mkdtempSync(join(tmpdir(), "hpr-output-")); const h = harness(root);
+  try {
+    const state = fixture(); state.report = "# Report\n\nEvidence [[sqlite-wal]]";
+    const store = new RunStore(root, state.tag); store.save(state);
+    const before = readFileSync(join(store.dir, "pi-state.json"));
+    h.ctx.cwd = output; const target = join(output, "chosen report.md");
+    await h.command(`save ${state.tag} ${target}`);
+    assert.match(readFileSync(target, "utf8"), /Recorded sources/);
+    writeFileSync(target, "User-edited copy");
+    await h.command(`save ${state.tag} ${target}`); assert.equal(readFileSync(target, "utf8"), "User-edited copy");
+    h.ctx.ui.confirm = async () => { writeFileSync(target, "Concurrent editor change"); return true; };
+    await h.command(`save ${state.tag} ${target}`); assert.equal(readFileSync(target, "utf8"), "Concurrent editor change");
+    assert.match(h.notices.at(-1)!, /changed since approval/);
+    assert.deepEqual(readFileSync(join(store.dir, "pi-state.json")), before);
+  } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); rmSync(output, { recursive: true, force: true }); }
+});
+
 test("the terminal preview fixture absorbs mistyped commands instead of starting model turns", () => {
   const h = harness(tmpdir(), previewWidget);
   assert.deepEqual(h.events.get("input")({ text: "/misspelled-demo", source: "interactive" }, h.ctx), { action: "handled" });

@@ -1,11 +1,12 @@
 import { createServer, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import type { Socket } from "node:net";
-import { dashboardCss, dashboardScript, renderMain, renderShell } from "./dashboard.ts";
+import { dashboardCss, dashboardScript, renderDashboard, renderMain, renderShell } from "./dashboard.ts";
 import { inventory, RunStore } from "./store.ts";
 import { searchReports } from "./report-search.ts";
 import { validateId } from "./paths.ts";
 import type { RunState } from "./types.ts";
+import { portableMarkdown } from "./export.ts";
 
 export interface DashboardServer {
   url: string; publish(state: RunState, runnerLive?: boolean): void; close(): Promise<void>;
@@ -41,7 +42,7 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
   const snapshot = (tag: string, line?: number) => {
     const state = load(tag);
     const lines = line ? state.report?.split("\n") : undefined;
-    return { tag, html: renderMain(state, liveRuns.get(tag) ?? false), at: state.updatedAt,
+    return { tag, html: renderMain(state, liveRuns.get(tag) ?? false), at: state.updatedAt, hasReport: state.report !== undefined,
       ...(line && lines ? { location: { line, text: lines.slice(Math.max(0, line - 3), line + 2).join("\n") } } : {}) };
   };
   const send = (client: Client) => {
@@ -80,6 +81,15 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
       if (route === `/${token}/runs`) {
         const data = list(); json({ runs: data.runs.map(metadata), issues: data.issues.length, partial: !!data.partial,
           scope: "initial" in scope ? "Access: this investigation only" : scope.allowedTags ? "Access: explicitly selected investigations" : "Access: all accessible central investigations (this token exposes their reports)" }); return;
+      }
+      if (route === `/${token}/markdown` || route === `/${token}/html`) {
+        const tag = url.searchParams.get("id") ?? ("initial" in scope ? scope.initial.tag : "");
+        if (!allowed(tag)) { res.writeHead(404).end("Not found"); return; }
+        const state = load(tag);
+        const markdown = route.endsWith("/markdown");
+        res.setHeader("Content-Type", markdown ? "text/markdown; charset=utf-8" : "text/html; charset=utf-8");
+        res.setHeader("Content-Disposition", `attachment; filename="${tag}.${markdown ? "md" : "html"}"`);
+        res.end(markdown ? portableMarkdown(state) : renderDashboard(state)); return;
       }
       if (route === `/${token}/run` || route === `/${token}/events`) {
         const tag = url.searchParams.get(route.endsWith("/run") ? "id" : "run") ?? ("initial" in scope ? scope.initial.tag : "");

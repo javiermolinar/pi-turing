@@ -21,10 +21,13 @@ test("inventory and search filter every endpoint to the capability's authorized 
       const search = await (await fetch(new URL("search?q=needle", instance.url))).json();
       assert.deepEqual(search.matches.map((match: any) => match.tag), ["allowed"]);
       assert.equal(search.scanned, 1);
-      for (const path of ["run?id=secret", "events?run=secret", "run?id=..%2Fsecret", "../pi-state.json"]) assert.equal((await fetch(new URL(path, instance.url))).status, 404);
+      for (const path of ["run?id=secret", "events?run=secret", "markdown?id=secret", "html?id=secret", "run?id=..%2Fsecret", "../pi-state.json"]) assert.equal((await fetch(new URL(path, instance.url))).status, 404);
       assert.equal((await fetch(new URL("run?id=allowed", instance.url), { method: "POST" })).status, 403);
       assert.equal((await fetch(new URL("search?q=needle", instance.url), { headers: { origin: "https://evil.invalid" } })).status, 403);
     }
+    const exported = await fetch(new URL("markdown?id=allowed", server.url));
+    assert.equal(exported.headers.get("content-disposition"), 'attachment; filename="allowed.md"');
+    assert.match(await exported.text(), /UNVERIFIED DRAFT/);
     const page = await (await fetch(server.url)).text();
     assert.match(page, /src="app.js"/); assert.match(page, /href="style.css"/);
     assert.ok(!page.includes("Confidential")); assert.ok(!page.includes("@keyframes"));

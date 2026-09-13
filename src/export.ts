@@ -112,9 +112,10 @@ export function prepareSave(cwd: string, input: string, protectedRoot: string): 
   if (isAbsolute(expanded) && (expanded === cwd || expanded.startsWith(cwd + sep))) path = resolve(realpathSync(cwd), relative(cwd, expanded));
   if (!/\.md$/i.test(path)) throw new Error("Choose a .md output file");
   const protectedPath = existsSync(protectedRoot) ? realpathSync(protectedRoot) : resolve(protectedRoot);
-  if (path === protectedPath || path.startsWith(protectedPath + sep)) throw new Error("Cannot save over managed research state");
+  const compare = (value: string) => process.platform === "win32" || process.platform === "darwin" ? value.toLowerCase() : value;
+  if (compare(path) === compare(protectedPath) || compare(path).startsWith(compare(protectedPath) + sep)) throw new Error("Cannot save over managed research state");
   for (let part = path; ; part = dirname(part)) {
-    if ([".git", ".pi", ".hyperresearch"].includes(part.split(sep).at(-1)!) || /^\.env(?:\.|$)/.test(part.split(sep).at(-1)!)) throw new Error("Refusing protected output path");
+    if ([".git", ".pi", ".hyperresearch"].includes(part.split(sep).at(-1)!.toLowerCase()) || /^\.env(?:\.|$)/i.test(part.split(sep).at(-1)!)) throw new Error("Refusing protected output path");
     try { if (lstatSync(part).isSymbolicLink()) throw new Error(`Refusing symlink: ${part}`); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (dirname(part) === part) break;

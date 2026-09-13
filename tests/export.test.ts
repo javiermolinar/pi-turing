@@ -74,7 +74,8 @@ test("save is atomic, refuses unapproved or changed overwrites, rejects unsafe p
     saveMarkdown(prepareSave(cwd, path, root), "Approved revision", true);
     assert.equal(readFileSync(path, "utf8"), "Approved revision");
     symlinkSync(path, join(cwd, "alias.md"));
-    for (const unsafe of [join(cwd, "alias.md"), join(root, "report.md"), join(cwd, ".env.md"), join(cwd, ".pi", "report.md"), join(cwd, "no-folder", "report.md"), "/dev/null", "bad\x00.md"]) assert.throws(() => prepareSave(cwd, unsafe, root));
+    for (const unsafe of [join(cwd, "alias.md"), join(root, "report.md"), join(cwd, ".env.md"), join(cwd, ".pi", "report.md"), join(cwd, ".PI", "report.md"), join(cwd, "no-folder", "report.md"), "/dev/null", "bad\x00.md"]) assert.throws(() => prepareSave(cwd, unsafe, root));
+    if (["darwin", "win32"].includes(process.platform)) assert.throws(() => prepareSave(cwd, join(cwd, "MANAGED", "report.md"), root), /managed research state/);
     const missing = prepareSave(cwd, join(cwd, "new.md"), root);
     symlinkSync(path, missing.path); assert.throws(() => saveMarkdown(missing, "Do not overwrite"), /symlink/);
     assert.equal(readFileSync(path, "utf8"), "Approved revision");

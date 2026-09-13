@@ -189,14 +189,29 @@ For DuckDuckGo, the minimal configuration is:
 Resume uses the saved configuration, originating project, model, and workspace,
 not the currently open project's configuration or files. UI starts/resumes require
 cost confirmation. Completed stages are not repeated, except that a failed
-verification can trigger another bounded polish/readability pass. Configuration
-changes on resume need an explicit approval flow; they are not inferred from cwd.
+verification can trigger another bounded polish/readability pass. Use `resume <tag> --use-project-config` to explicitly propose the current project's
+preferences (including budget/provider changes); Pi shows the previous and proposed
+configuration for confirmation. Saved context and the default model stay pinned.
 
 After upgrading from the Parallel/Serply version, **pause active runs and reload
 Pi**. Replace those provider names in `.pi/hyperresearch.json`; they are no longer
 accepted for execution. Old checkpoints remain readable for status and dashboard
 views. Legacy providers cannot execute and are never replaced silently. Existing
 checkout-local artifacts require explicit migration before central resume.
+
+## Run picker
+
+Bare `/hyperresearch` opens saved investigations with **New research** first.
+Type to filter by question, project or run ID; arrows navigate, Enter opens actions,
+and Escape dismisses without replacing the draft prompt. RPC uses native selection;
+print/JSON modes list metadata without starting work. `/hyperresearch list` also
+lists central runs directly, and `/hyperresearch help` retains command documentation.
+
+View is read-only. Resume and Revise require explicit cost confirmation in the UI.
+Steer/Pause/Cancel appear only for this session's active runner. Saved `running`
+status is not ownership; external writer locks and missing workspaces disable paid
+actions. Corrupt checkpoints remain visible as unavailable entries. Export/save
+actions follow in the report-delivery slice.
 
 ## Dashboard
 

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Type } from "typebox";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { PythonBackend, setupBackend } from "../src/backend.ts";
 import { execute } from "../src/process.ts";
 import { ResearchRunner } from "../src/runner.ts";
@@ -11,20 +11,24 @@ import { ensureSearchConfigured } from "../src/search.ts";
 import { queueFeedback, feedbackSummary } from "../src/feedback.ts";
 import { progressLines } from "../src/progress.ts";
 import { ResearchWidget } from "../src/widget.ts";
-import { listRuns, loadConfig, RunStore } from "../src/store.ts";
+import { inventory, listRuns, loadConfig, RunStore } from "../src/store.ts";
 import { createLocation, dataRoot, requireLocation } from "../src/paths.ts";
-import { lockDataRoot, lockWorkspace } from "../src/locks.ts";
+import { lockDataRoot, lockWorkspace, writerLocked } from "../src/locks.ts";
 import { migrateLegacy, previewMigration, rollbackMigration } from "../src/migration.ts";
+import { pickerRows, RunPicker, runActions } from "../src/picker.ts";
 import { cleanTerminal, configSchema, feedbackTextSchema, message, type RunState } from "../src/types.ts";
 import { PiWorkerDriver } from "../src/worker.ts";
 
 const help = `Hyperresearch — light pipeline (experimental)
+/hyperresearch                  Browse saved investigations (no model work)
+/hyperresearch list             List central runs without opening a picker
 /hyperresearch start <question>  Start research using the selected Pi model
 /hyperresearch status [tag]      Show persisted progress
 /hyperresearch steer <feedback>  Queue feedback; replan at next stage boundary
 /hyperresearch revise <tag> <feedback>  New revision of a completed report
 /hyperresearch pause             Interrupt safely; keep artifacts
-/hyperresearch resume [tag]      Resume first incomplete stage
+/hyperresearch resume [tag]      Resume with saved context/configuration
+  Add --use-project-config to explicitly propose current project preferences
 /hyperresearch cancel            Abort; keep artifacts
 /hyperresearch dashboard [tag]   Open live localhost dashboard
 /hyperresearch snapshot [tag]    Open saved standalone HTML
@@ -91,12 +95,12 @@ export default function hyperresearch(pi: ExtensionAPI) {
     try { await execute(command, [url], { cwd: ctx.cwd, timeoutMs: 10_000, signal: lifecycle.signal }); }
     catch { say(ctx, `Open this URL manually: ${url}`); }
   };
-  function launch(ctx: ExtensionContext, query?: string, resumeTag?: string, revision?: { tag: string; feedback: string }): Promise<void> {
+  function launch(ctx: ExtensionContext, query?: string, resumeTag?: string, revision?: { tag: string; feedback: string }, useProjectConfig = false): Promise<void> {
     if (active || launching) return Promise.reject(new Error("A run is already active. Pause or cancel it first."));
-    startup = launchInner(ctx, query, resumeTag, revision);
+    startup = launchInner(ctx, query, resumeTag, revision, useProjectConfig);
     return startup;
   }
-  async function launchInner(ctx: ExtensionContext, query?: string, resumeTag?: string, revision?: { tag: string; feedback: string }): Promise<void> {
+  async function launchInner(ctx: ExtensionContext, query?: string, resumeTag?: string, revision?: { tag: string; feedback: string }, useProjectConfig = false): Promise<void> {
     trusted(ctx);
     if (active || launching) throw new Error("A run is already active. Pause or cancel it first.");
     launching = true;
@@ -106,9 +110,9 @@ export default function hyperresearch(pi: ExtensionAPI) {
       const selected = revision ? new RunStore(root, revision.tag).load() : query === undefined ? new RunStore(root, resolveState(ctx, resumeTag).tag).load() : undefined;
       if (!revision && selected && ["done", "aborted"].includes(selected.status)) throw new Error(`Cannot resume a ${selected.status} run`);
       const location = selected ? requireLocation(selected, root) : createLocation(ctx.cwd, root);
-      const config = selected ? configSchema.parse(selected.config) : loadConfig(ctx.cwd);
+      const config = selected && !useProjectConfig ? configSchema.parse(selected.config) : loadConfig(ctx.cwd);
       if (ctx.hasUI && !await ctx.ui.confirm(selected ? (revision ? "Create revision?" : "Resume paid research?") : "Start research?",
-        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? "Uses saved configuration and context, not this project's files." : "No local files or integrations attached."}`)) return;
+        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.") : "No local files or integrations attached."}`)) return;
       const lost = (error: Error) => { lifecycle.abort(); active?.stop("paused"); say(ctx, `Runner lock lost: ${message(error)}`); };
       const unlockRoot = await lockDataRoot(root, lost);
       release = unlockRoot;
@@ -131,7 +135,9 @@ export default function hyperresearch(pi: ExtensionAPI) {
           : await ResearchRunner.create(location.projectPath, query!, config, `${ctx.model!.provider}/${ctx.model!.id}`, ctx.thinkingLevel ?? "medium",
             backend, driver, state => show(state, ctx), undefined, location);
       } else {
-        active = new ResearchRunner(location.projectPath, new RunStore(root, selected!.tag).load(), backend, driver, current => show(current, ctx));
+        const state = new RunStore(root, selected!.tag).load();
+        state.config = config; // Only an explicit --use-project-config proposes replacements.
+        active = new ResearchRunner(location.projectPath, state, backend, driver, current => show(current, ctx));
       }
       if (lifecycle.signal.aborted) { active.stop("paused"); throw new Error("Session ended during research setup"); }
       const runner = active;
@@ -153,14 +159,49 @@ export default function hyperresearch(pi: ExtensionAPI) {
 
   pi.registerCommand("hyperresearch", {
     description: "Research with a persistent vault and live/offline HTML dashboard",
-    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup", "migrate", "help"]
+    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup", "migrate", "list", "help"]
       .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
-    handler: async (args, ctx) => {
+    handler: async function handleCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
       try {
         const input = args.trim();
         const [command, ...rest] = input.split(/\s+/);
         const argument = rest.join(" ");
-        if (!input || command === "help") { say(ctx, help); return; }
+        if (command === "help") { say(ctx, help); return; }
+        if (!input || command === "list") {
+          trusted(ctx);
+          const entries = inventory(dataRoot());
+          const rows = pickerRows(entries, active?.state.tag);
+          if (command === "list" || !ctx.hasUI) {
+            say(ctx, rows.length ? rows.map(row => `${row.id}: ${row.title} · ${row.description}`).join("\n") : "No saved runs. Use /hyperresearch start <question>.");
+            return;
+          }
+          const choice = ctx.mode === "tui"
+            ? await ctx.ui.custom<string | null>((tui, theme, keys, done) => new RunPicker(rows, theme, keys, done, () => tui.requestRender(), Math.max(2, Math.min(8, tui.terminal.rows - 13))))
+            : await ctx.ui.select("Saved investigations (opening starts no research)", ["New research", ...rows.map(row => `${row.id} · ${row.title} · ${row.description}`)]).then(value => value === "New research" ? "_new" : rows.find(row => value?.startsWith(`${row.id} · `))?.id);
+          if (!choice) return;
+          if (choice === "_new") {
+            const question = await ctx.ui.input("Research question");
+            if (question?.trim()) await launch(ctx, question.trim());
+            return;
+          }
+          const state = new RunStore(dataRoot(), choice).load();
+          let workspaceAvailable = true;
+          try { requireLocation(state, dataRoot()); } catch (error) { workspaceAvailable = false; say(ctx, message(error)); }
+          const ownership = active?.state.tag === state.tag ? "session" : await writerLocked(dataRoot()) ? "external" : "saved";
+          if (ownership === "external") say(ctx, "A writer owns this data root. Only read-only actions are available.");
+          const action = await ctx.ui.select(cleanTerminal(`${state.query}\n${state.tag} · ${state.status} · ${state.location?.projectPath ?? "Legacy"}`), runActions(state, ownership, workspaceAvailable));
+          if (!action) return;
+          if (action === "View") await handleCommand(`dashboard ${state.tag}`, ctx);
+          else if (action === "Resume") await launch(ctx, undefined, state.tag);
+          else if (action === "Revise") {
+            const feedback = await ctx.ui.input("Revision instructions (parent report preserved)");
+            if (feedback?.trim()) await launch(ctx, undefined, undefined, { tag: state.tag, feedback });
+          } else if (action === "Steer") {
+            const feedback = await ctx.ui.input("Steering (queued at next safe boundary)");
+            if (feedback?.trim()) await handleCommand(`steer ${feedback}`, ctx);
+          } else await handleCommand(action.toLowerCase(), ctx);
+          return;
+        }
         if (command === "migrate") {
           trusted(ctx);
           if (active || launching) throw new Error("Stop research before migration");
@@ -240,7 +281,11 @@ export default function hyperresearch(pi: ExtensionAPI) {
           const [tag, ...feedback] = rest;
           if (!tag || !feedback.length) throw new Error("Usage: /hyperresearch revise <tag> <feedback>");
           await launch(ctx, undefined, undefined, { tag, feedback: feedbackTextSchema.parse(feedback.join(" ")) });
-        } else if (command === "resume") await launch(ctx, undefined, argument || undefined);
+        } else if (command === "resume") {
+          const tags = rest.filter(value => value !== "--use-project-config");
+          if (tags.length > 1 || tags[0]?.startsWith("--")) throw new Error("Usage: resume [tag] [--use-project-config]");
+          await launch(ctx, undefined, tags[0], undefined, rest.includes("--use-project-config"));
+        }
         else await launch(ctx, command === "start" ? input.slice(6).trim() : input);
         // In print/JSON mode don't let process exit while workers are in flight.
         if (!ctx.hasUI) await task;

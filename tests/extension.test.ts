@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { lockDataRoot } from "../src/locks.ts";
@@ -10,16 +10,40 @@ import previewWidget from "../scripts/preview-widget.ts";
 import { RunStore } from "../src/store.ts";
 import { fixture } from "./fixtures.ts";
 
-function harness(cwd: string, factory = extension) {
+export function harness(cwd: string, factory = extension) {
   process.env.HYPERRESEARCH_DATA_ROOT = cwd;
   const commands = new Map<string, any>(); const events = new Map<string, any>(); const notices: string[] = [];
   const ctx: any = { cwd, mode: "rpc", hasUI: true, isProjectTrusted: () => true,
-    ui: { notify: (text: string) => notices.push(text), setWidget: () => {}, setEditorText: () => { throw new Error("Must not replace user input"); } } };
+    ui: { select: async () => undefined, confirm: async () => false, input: async () => undefined, notify: (text: string) => notices.push(text), setWidget: () => {}, setEditorText: () => { throw new Error("Must not replace user input"); } } };
   const pi: any = { registerCommand: (name: string, spec: any) => commands.set(name, spec), on: (name: string, handler: any) => events.set(name, handler),
     registerTool: () => {}, appendEntry: () => {}, sendUserMessage: () => { throw new Error("Must not start model turns"); } };
   factory(pi);
   return { ctx, events, notices, command: (input: string) => commands.get("hyperresearch").handler(input, ctx) };
 }
+
+test("bare picker, list, status and denied cross-project resume never mutate checkpoints or use ambient preferences", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hpr-read-only-")); const h = harness(root);
+  try {
+    const origin = join(root, "origin"); privateDirectory(origin);
+    const other = join(root, "other"); privateDirectory(join(other, ".pi"));
+    writeFileSync(join(other, ".pi", "hyperresearch.json"), JSON.stringify({ searchProvider: "duckduckgo", budgetUsd: 99 }));
+    const state = fixture(); state.status = "paused"; state.location = createLocation(origin, root);
+    privateDirectory(state.location.workspacePath);
+    const store = new RunStore(root, state.tag); store.save(state);
+    const before = readFileSync(join(store.dir, "pi-state.json"));
+    h.ctx.cwd = other;
+    const proposals: string[] = [];
+    h.ctx.ui.confirm = async (_title: string, text: string) => { proposals.push(text); return false; };
+    h.events.get("session_start")({}, h.ctx);
+    assert.equal(h.events.get("before_agent_start")({ systemPrompt: "base" }, h.ctx), undefined);
+    await h.command(""); await h.command("list"); await h.command(`status ${state.tag}`);
+    await h.command(`resume ${state.tag}`);
+    assert.match(proposals[0], /saved configuration/); assert.match(proposals[0], /Search: brave/);
+    await h.command(`resume ${state.tag} --use-project-config`);
+    assert.match(proposals[1], /Proposed configuration replacement/); assert.match(proposals[1], /Search: duckduckgo/);
+    assert.deepEqual(readFileSync(join(store.dir, "pi-state.json")), before);
+  } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("the terminal preview fixture absorbs mistyped commands instead of starting model turns", () => {
   const h = harness(tmpdir(), previewWidget);

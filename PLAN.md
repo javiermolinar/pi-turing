@@ -529,16 +529,18 @@ absent. Keep regression coverage for the working light pipeline throughout.
       lock ownership, and interrupted migration (including a killed process).
 - [ ] Add a relocated-package integration test; package paths currently resolve
       from import.meta.url independently of state.
-- [ ] Test that view/list/search never resume work or replace saved context.
+- [x] Test that view/list never resume work or replace saved context.
+- [ ] Extend the no-work/no-context-replacement assertion to report search in M1c.
 
 ### M1b — Pi run picker
 
-- [ ] Open the picker for bare `/hyperresearch`; retain `/hyperresearch help` and
+- [x] Open the picker for bare `/hyperresearch`; retain `/hyperresearch help` and
       direct commands for automation/non-interactive modes.
-- [ ] Add New research, recent-run rows, filtering, keyboard navigation, and details.
-- [ ] Expose status-appropriate actions with explicit confirmation of resumed paid
-      work and proposed configuration/context changes.
-- [ ] Test empty history, active/external/stale statuses, selection/cancel behavior,
+- [x] Add New research, recent-run rows, filtering, keyboard navigation, and details.
+- [x] Expose status-appropriate actions with explicit confirmation of resumed paid
+      work and proposed configuration changes (context changes remain unavailable).
+      Export/save actions follow in M1d.
+- [x] Test empty history, active/external/stale statuses, selection/cancel behavior,
       terminal widths, and preservation of the existing prompt.
 
 ### M1c — Shared web app, inventory, and grep-like search

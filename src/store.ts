@@ -1,12 +1,12 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { configSchema, now, stateSchema, type Config, type RunState } from "./types.ts";
 import { renderDashboard } from "./dashboard.ts";
+import { privateDirectory, safePath, validateId } from "./paths.ts";
 
 export function validateTag(tag: string): string {
-  if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(tag)) throw new Error("Invalid run tag");
-  return tag;
+  return validateId(tag);
 }
 export function atomicWrite(path: string, text: string): void {
   if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`Refusing symlink: ${path}`);
@@ -21,21 +21,22 @@ export function loadConfig(cwd: string): Config {
 export class RunStore {
   readonly dir: string;
   readonly reportPath: string;
-  constructor(readonly cwd: string, readonly tag: string) {
+  constructor(readonly root: string, readonly tag: string) {
     validateTag(tag);
-    this.dir = join(cwd, "research", "runs", tag);
-    this.reportPath = join(cwd, "research", "notes", `final_report_${tag}.md`);
+    this.dir = safePath(root, "runs", tag);
+    this.reportPath = join(this.dir, "report.md");
   }
   load(): RunState {
-    const state = stateSchema.parse(JSON.parse(readFileSync(join(this.dir, "pi-state.json"), "utf8")));
+    const path = safePath(this.root, "runs", this.tag, "pi-state.json");
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.size > 8_000_000) throw new Error("Invalid or oversized checkpoint");
+    const state = stateSchema.parse(JSON.parse(readFileSync(path, "utf8")));
     if (state.tag !== this.tag) throw new Error("Run tag does not match state file");
     return state;
   }
   archiveDraft(feedbackId: number, report: string): void {
     if (!Number.isSafeInteger(feedbackId) || feedbackId < 1) throw new Error("Invalid feedback ID");
-    for (const dir of [join(this.cwd, "research"), join(this.cwd, "research", "runs"), this.dir]) {
-      if (lstatSync(dir).isSymbolicLink()) throw new Error(`Refusing symlink directory: ${dir}`);
-    }
+    safePath(this.root, "runs", this.tag);
     const path = join(this.dir, `draft-before-feedback-${feedbackId}.md`);
     if (existsSync(path)) {
       if (lstatSync(path).isSymbolicLink() || readFileSync(path, "utf8") !== report) throw new Error("Refusing to overwrite a draft archive");
@@ -44,12 +45,11 @@ export class RunStore {
     atomicWrite(path, report);
   }
   save(state: RunState): void {
+    if (state.tag !== this.tag) throw new Error("Run tag does not match store");
     state.updatedAt = now();
     stateSchema.parse(state);
-    for (const path of [join(this.cwd, "research"), join(this.cwd, "research", "runs"), this.dir, join(this.cwd, "research", "notes")]) {
-      if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error(`Refusing symlink directory: ${path}`);
-      mkdirSync(path, { recursive: true, mode: 0o700 });
-    }
+    safePath(this.root, "runs", this.tag);
+    privateDirectory(this.dir);
     // Authoritative checkpoint first. Remaining files are materialized views;
     // resume rematerializes them after an interrupted save.
     atomicWrite(join(this.dir, "pi-state.json"), JSON.stringify(state, null, 2) + "\n");
@@ -69,10 +69,38 @@ export class RunStore {
     atomicWrite(join(this.dir, "dashboard.html"), renderDashboard(state));
   }
 }
-export function listRuns(cwd: string): RunState[] {
-  const dir = join(cwd, "research", "runs");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap(tag => {
-    try { return [new RunStore(cwd, tag).load()]; } catch { return []; }
-  }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+/** Temporary Python adapter views; central checkpoint remains authoritative. */
+export function materializeBackend(state: RunState): void {
+  if (!state.location) return;
+  const root = state.location.workspacePath;
+  const run = safePath(root, "research", "runs", validateTag(state.tag));
+  const notes = safePath(root, "research", "notes");
+  privateDirectory(run); privateDirectory(notes);
+  if (state.report !== undefined) atomicWrite(join(notes, `final_report_${state.tag}.md`), state.report);
+  for (const [file, value] of [
+    ["prompt-decomposition.json", state.decomposition ? { ...state.decomposition, pipeline_tier: "light", response_format: "short" } : undefined],
+    ["polish-log.json", state.patches["15"]], ["readability-decisions.json", state.patches["16"]],
+  ] as const) {
+    const path = safePath(run, file);
+    if (value) atomicWrite(path, JSON.stringify(value, null, 2));
+    else if (existsSync(path)) unlinkSync(path);
+  }
 }
+
+export interface Inventory {
+  runs: RunState[];
+  issues: { tag: string; error: string }[];
+}
+export function inventory(root: string): Inventory {
+  const result: Inventory = { runs: [], issues: [] };
+  const dir = safePath(root, "runs");
+  if (!existsSync(dir)) return result;
+  for (const tag of readdirSync(dir)) {
+    try { result.runs.push(new RunStore(root, tag).load()); }
+    catch (error) { result.issues.push({ tag, error: error instanceof Error ? error.message : String(error) }); }
+  }
+  result.runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return result;
+}
+export function listRuns(root: string): RunState[] { return inventory(root).runs; }
+

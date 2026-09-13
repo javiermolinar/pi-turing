@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAbsolute } from "node:path";
 import { searchProviderSchema } from "./search.ts";
 
 export const stepIds = ["1", "2", "10", "15", "16"] as const;
@@ -62,6 +63,12 @@ export const revisionSchema = z.object({
 });
 export const stateSchema = z.object({
   version: z.literal(1), tag: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+  location: z.object({
+    projectPath: z.string().refine(isAbsolute), dataRoot: z.string().refine(isAbsolute),
+    workspaceId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/), workspacePath: z.string().refine(isAbsolute),
+    // No local context or integration grants exist in the light pipeline yet.
+    contextRefs: z.array(z.string()).max(0), approvalRefs: z.array(z.string()).max(0),
+  }).strict().optional(),
   query: z.string().min(1).max(30_000),
   profile: z.literal("light"),
   status: z.enum(["paused", "running", "blocked", "done", "aborted", "failed"]),
@@ -73,7 +80,7 @@ export const stateSchema = z.object({
   createdAt: z.string(), updatedAt: z.string(),
   elapsedMs: z.number().nonnegative(),
   // Legacy names remain readable in saved checkpoints, never executable.
-  // Explicit resume replaces this with the current validated project config.
+  // Resume validates the saved config; project config is never substituted silently.
   config: configSchema.extend({ searchProvider: z.enum(["brave", "duckduckgo", "parallel", "serply"]).default("brave") }),
   model: z.string(), thinking: thinkingSchema,
   sourceMin: z.number().int().min(1), wordTarget: z.tuple([z.number(), z.number()]),

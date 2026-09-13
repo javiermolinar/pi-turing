@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import lockfile from "proper-lockfile";
+import { lockDataRoot } from "../src/locks.ts";
+import { createLocation, privateDirectory } from "../src/paths.ts";
 import extension from "../extensions/index.ts";
 import previewWidget from "../scripts/preview-widget.ts";
 import { RunStore } from "../src/store.ts";
 import { fixture } from "./fixtures.ts";
 
 function harness(cwd: string, factory = extension) {
+  process.env.HYPERRESEARCH_DATA_ROOT = cwd;
   const commands = new Map<string, any>(); const events = new Map<string, any>(); const notices: string[] = [];
   const ctx: any = { cwd, mode: "rpc", hasUI: true, isProjectTrusted: () => true,
     ui: { notify: (text: string) => notices.push(text), setWidget: () => {}, setEditorText: () => { throw new Error("Must not replace user input"); } } };
@@ -29,6 +31,7 @@ test("paused steering is saved under the vault lock; chat provides read-only con
   const cwd = mkdtempSync(join(tmpdir(), "hpr-extension-")); const h = harness(cwd);
   try {
     const state = fixture(); state.status = "paused";
+    state.location = createLocation(cwd, cwd); privateDirectory(state.location.workspacePath);
     const store = new RunStore(cwd, state.tag); store.save(state);
     h.events.get("session_start")({}, h.ctx);
     assert.equal(h.events.has("input"), false); // Editor input is neither intercepted nor locked.
@@ -52,7 +55,7 @@ test("another runner's lock and untrusted projects prevent persisted steering", 
   try {
     const state = fixture(); state.status = "paused";
     const store = new RunStore(cwd, state.tag); store.save(state);
-    unlock = await lockfile.lock(cwd, { lockfilePath: join(cwd, ".hyperresearch-runner.lock") });
+    unlock = await lockDataRoot(cwd);
     await h.command("steer Do not compete");
     assert.equal(store.load().feedback.length, 0);
     assert.match(h.notices.at(-1)!, /lock/i);

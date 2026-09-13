@@ -186,16 +186,17 @@ For DuckDuckGo, the minimal configuration is:
 { "searchProvider": "duckduckgo" }
 ```
 
-Resume reads this config again, allowing a deliberate provider change or budget
-increase. It keeps the original query and default model. Completed stages are
-not repeated, except that a failed verification can trigger another bounded
-polish/readability pass.
+Resume uses the saved configuration, originating project, model, and workspace,
+not the currently open project's configuration or files. UI starts/resumes require
+cost confirmation. Completed stages are not repeated, except that a failed
+verification can trigger another bounded polish/readability pass. Configuration
+changes on resume need an explicit approval flow; they are not inferred from cwd.
 
 After upgrading from the Parallel/Serply version, **pause active runs and reload
 Pi**. Replace those provider names in `.pi/hyperresearch.json`; they are no longer
 accepted for execution. Old checkpoints remain readable for status and dashboard
-views. Explicit resume uses the current project config (Brave by default), not
-the old saved provider. Existing research artifacts are not migrated or deleted.
+views. Legacy providers cannot execute and are never replaced silently. Existing
+checkout-local artifacts require explicit migration before central resume.
 
 ## Dashboard
 
@@ -234,18 +235,19 @@ review them before sharing.
 ## State and recovery
 
 ```text
-research/
-  notes/                         # Shared Hyperresearch Markdown source vault
-    final_report_<tag>.md         # Materialized report
+~/.pi/hyperresearch/             # Override: HYPERRESEARCH_DATA_ROOT (absolute)
   runs/<tag>/
-    query.md                     # Original query, verbatim
-    pi-state.json                # Authoritative Pi scheduler checkpoint
-    run.json                     # Backend manifest, stage mirror and ship verdict
+    pi-state.json                # Authoritative scheduler, identity and report
+    report.md                    # Materialized Markdown, not a user-edited export
     prompt-decomposition.json
     polish-log.json
     readability-decisions.json
-    dashboard.html               # Offline snapshot
-.hyperresearch/                  # Backend config and rebuildable SQLite index
+    dashboard.html               # Offline snapshot (shared-shell work follows)
+  workspaces/<workspace-id>/      # Private, replaceable Python adapter state
+    .hyperresearch/              # Temporary backend config/SQLite
+    research/                    # Evidence/assets and backend materialized views
+
+<project>/.pi/hyperresearch.json  # New-run preferences, never central results
 ```
 
 `pi-state.json` owns scheduling, cost, worker records, and the report body. The
@@ -258,7 +260,14 @@ incomplete stage. Already saved source notes remain available. This is
 **stage-level recovery**, not continuation of an interrupted model conversation.
 A crashed Pi session never auto-resumes paid work.
 
-Only one runner may mutate a vault through this port at a time. A heartbeat lock
+New investigations have separate workspaces; revisions reuse their parent's
+workspace explicitly. Saved location and empty context/approval references make
+cross-project recovery independent of cwd. Legacy checkpoints remain readable;
+missing/corrupt checkpoints are reported by the filesystem inventory. Merely
+opening or listing runs performs no research. Unrelated runs are not injected into
+chat automatically. New state directories/files use private permissions.
+
+Only one runner may mutate a data root through this port at a time. A heartbeat lock
 rejects other Pi runners and becomes reclaimable after roughly 30 seconds without
 a heartbeat. Avoid running the upstream CLI's mutating commands concurrently;
 it does not participate in that lock. One interrupted source fetch may leave

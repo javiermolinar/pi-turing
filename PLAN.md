@@ -1,7 +1,12 @@
 # Plan: first-class investigation and report generation
 
-Status: proposed roadmap. No runtime changes, migrations, provider enablement,
-or paid research runs are authorized by this document.
+Status: implementation in progress. The user authorized implementation, per-block
+commits, and explicit migration of existing runs. Provider enablement and paid
+research/evaluation runs still require separate approval.
+
+Upstream: https://github.com/jordan-gibbs/hyperresearch. Adapt its research
+capabilities for Pi through composable contracts, not its end-to-end storage product.
+Research parity is the target; measured coverage, not feature names, establishes it.
 
 Comparison baseline: Hyperresearch 0.11.1 at
 `75b1ecfb2891184fad2cc1a2ddf9abe476f5b54c`.
@@ -44,9 +49,12 @@ parser, crawler, or database implementation ourselves. Searching different place
 and actually reading the evidence are core research features even when their
 implementation comes from another package.
 
-The retained Python backend already supplies useful operations, including
-static/PDF retrieval. Keep using it where it works. There is no standalone goal
-to port its storage layer to TypeScript.
+The retained Python backend supplies useful operations, including static/PDF
+retrieval. Use it temporarily behind replaceable adapters while research features
+are developed. Its storage is an implementation dependency to retire, not the
+product architecture. The final delivery phase replaces all retained Python code
+with TypeScript for a pure Pi package, without porting upstream knowledge-base
+features that are outside the research boundary.
 
 ## 2. Current capabilities and research gaps
 
@@ -461,6 +469,36 @@ source/report limits. Post-draft corrections remain bounded; structural changes
 require an explicit new pass/revision. Compare outcomes on approved research tasks
 before making any upstream parity claim.
 
+### M6 — Pure TypeScript Pi runtime (final phase)
+
+Replace every retained Python research operation and the Python bridge with
+TypeScript implementations or approved JavaScript/TypeScript libraries behind the
+same discovery, acquisition, evidence, and run-state contracts. Remove Python,
+uv, the Python virtual environment, and the upstream storage backend from the
+installed package and normal setup. This is a research-capability migration, not
+a rewrite of upstream's end-to-end knowledge product.
+
+Before replacement, maintain a capability-by-capability parity matrix against the
+pinned upstream revision: supported inputs and outputs, research stages, evidence
+gates, provenance, failure modes, budgets, cancellation, and recovery. Explicitly
+mark intentional exclusions (knowledge-base lifecycle, catalog/index/graph
+maintenance, import/watch/MCP) and unverified or deferred research capabilities.
+Use fixture/contract tests and approved comparative evaluations to establish
+behavioral parity. Do not infer equivalence from matching tool or stage names.
+
+Deliver adapters incrementally, running old and new implementations against the
+same offline fixtures. Preserve report/citation IDs, source hashes and assets,
+read coverage, audits, revision lineage, spend, and resumability. Provide explicit,
+previewed, locked, reversible migration of Python-owned working state; originals
+remain until explicitly removed. Do not require users to operate a storage server
+or adopt a knowledge-management workflow.
+
+Acceptance: installation and research/report workflows work with Python and uv
+absent; package contents contain no Python runtime dependencies; tests cover all
+retained research contracts and the parity matrix explains every difference.
+Network/evaluation costs require explicit approval. Keep optional destinations
+independent and avoid replacing one monolith with another TypeScript monolith.
+
 ### Optional follow-up — Publication integrations
 
 Add a Lumbrera or other destination adapter only when users need it. Reuse its
@@ -476,13 +514,14 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ### M1a — Central state and safe recovery
 
-- [ ] Introduce explicit project, package, data-root, workspace, and output paths;
+- [x] Introduce explicit project, package, data-root, and workspace paths;
+      output destinations follow in M1d;
       remove ambient-cwd assumptions from run loading and backend operations.
-- [ ] Default new runs to `~/.pi/hyperresearch/runs/<id>` and working data to the
+- [x] Default new runs to `~/.pi/hyperresearch/runs/<id>` and working data to the
       configured external workspace root; keep live data out of the code repository.
-- [ ] Persist originating project, stable workspace references, context/approval
+- [x] Persist originating project, stable workspace references, context/approval
       references, and revision lineage; support old checkpoints explicitly.
-- [ ] Implement a filesystem-based inventory and central run-ID resolver; do not
+- [x] Implement a filesystem-based inventory and central run-ID resolver; do not
       add an inventory database.
 - [ ] Add explicit migration preview, locks, staged copy/validation, collision
       refusal, rollback, and original-preservation behavior.
@@ -596,6 +635,24 @@ absent. Keep regression coverage for the working light pipeline throughout.
       global reconciliation, and final report assembly.
 - [ ] Run approved comparative evaluations before claiming upstream research parity.
 
+### M6 — Pure TypeScript migration and research parity
+
+- [ ] Build and maintain a parity matrix against pinned upstream research behavior;
+      classify supported, partial, deferred, unverified, and intentionally excluded
+      capabilities, with evidence and tests for each retained contract.
+- [ ] Replace Python discovery/acquisition/readers with composable TypeScript
+      adapters, including PDF extraction and full-text recovery; compare fixtures.
+- [ ] Replace Python orchestration/verification operations still used by Pi without
+      weakening evidence, cancellation, budget, or recovery gates.
+- [ ] Remove the upstream storage dependency; retain minimal private run/evidence
+      state behind contracts, not upstream knowledge-base workflows.
+- [ ] Migrate preserved Python-owned state explicitly with preview, locks,
+      validation, collision refusal, rollback, and original preservation.
+- [ ] Remove bridge, uv/setup, virtual environment, Python packaging and runtime
+      dependencies only after replacement contracts pass regression tests.
+- [ ] Verify clean install, research, resume, revise, inspect, search, and exports
+      in an environment without Python or uv; run approved parity evaluations.
+
 ### Optional publication
 
 - [ ] Add a destination adapter only when needed, respecting its CLI/write, evidence,
@@ -608,5 +665,6 @@ absent. Keep regression coverage for the working light pipeline throughout.
 Start with **M1a**, then deliver the picker, shared web inventory/search, and report
 exports as small reviewable changes. Keep **scholarly investigation in M2** as the
 next research capability priority. The important remaining work is better research
-and reports—not a new database, central vault manager, or Python-to-TypeScript
-storage port. Updating this checklist does not migrate data or start implementation.
+and reports—not a new database or central vault manager. Finish with M6's pure
+TypeScript migration once the research contracts and parity evidence are in place;
+do not port out-of-scope knowledge-base features merely because upstream has them.

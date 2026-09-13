@@ -1,7 +1,6 @@
-import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import lockfile from "proper-lockfile";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PythonBackend, setupBackend } from "../src/backend.ts";
@@ -13,7 +12,9 @@ import { queueFeedback, feedbackSummary } from "../src/feedback.ts";
 import { progressLines } from "../src/progress.ts";
 import { ResearchWidget } from "../src/widget.ts";
 import { listRuns, loadConfig, RunStore } from "../src/store.ts";
-import { cleanTerminal, feedbackTextSchema, message, type RunState } from "../src/types.ts";
+import { createLocation, dataRoot, requireLocation } from "../src/paths.ts";
+import { lockDataRoot, lockWorkspace } from "../src/locks.ts";
+import { cleanTerminal, configSchema, feedbackTextSchema, message, type RunState } from "../src/types.ts";
 import { PiWorkerDriver } from "../src/worker.ts";
 
 const help = `Hyperresearch — light pipeline (experimental)
@@ -73,8 +74,8 @@ export default function hyperresearch(pi: ExtensionAPI) {
     } else if (ctx.hasUI) ctx.ui.setWidget("hyperresearch", progressLines(state, live, Date.now(), 0, url));
   };
   const resolveState = (ctx: ExtensionContext, tag?: string): RunState => {
-    const state = tag ? new RunStore(ctx.cwd, tag).load() : active?.state ?? latest ?? listRuns(ctx.cwd)[0];
-    if (!state) throw new Error("No Hyperresearch run in this directory");
+    const state = tag ? new RunStore(dataRoot(), tag).load() : active?.state ?? latest ?? listRuns(dataRoot()).find(s => s.location?.projectPath === realpathSync(ctx.cwd));
+    if (!state) throw new Error("No selected Hyperresearch run. Supply a central run ID.");
     if (state.status === "running" && active?.state.tag !== state.tag) {
       return { ...state, reason: "Last recorded as running. This Pi session is showing saved state, not live worker activity; another process may own the vault." };
     }
@@ -98,33 +99,36 @@ export default function hyperresearch(pi: ExtensionAPI) {
     launching = true;
     try {
       lifecycle.signal.throwIfAborted();
-      // No two Pi sessions may mutate the same vault through this port.
-      // proper-lockfile heartbeats and reclaims a stale lock after a crash.
-      release = await lockfile.lock(ctx.cwd, {
-        lockfilePath: join(ctx.cwd, ".hyperresearch-runner.lock"), retries: 0,
-        stale: 30_000, update: 10_000,
-        onCompromised: error => { active?.stop("paused"); say(ctx, `Runner lock lost: ${message(error)}`); },
-      });
-      for (const path of [".hyperresearch", "research"]) {
-        const full = join(ctx.cwd, path);
-        if (existsSync(full) && lstatSync(full).isSymbolicLink()) throw new Error(`Refusing symlink workspace: ${full}`);
+      const root = dataRoot();
+      const selected = revision ? new RunStore(root, revision.tag).load() : query === undefined ? new RunStore(root, resolveState(ctx, resumeTag).tag).load() : undefined;
+      if (!revision && selected && ["done", "aborted"].includes(selected.status)) throw new Error(`Cannot resume a ${selected.status} run`);
+      const location = selected ? requireLocation(selected, root) : createLocation(ctx.cwd, root);
+      const config = selected ? configSchema.parse(selected.config) : loadConfig(ctx.cwd);
+      if (ctx.hasUI && !await ctx.ui.confirm(selected ? (revision ? "Create revision?" : "Resume paid research?") : "Start research?",
+        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? "Uses saved configuration and context, not this project's files." : "No local files or integrations attached."}`)) return;
+      const lost = (error: Error) => { lifecycle.abort(); active?.stop("paused"); say(ctx, `Runner lock lost: ${message(error)}`); };
+      const unlockRoot = await lockDataRoot(root, lost);
+      release = unlockRoot;
+      const unlockWorkspace = await lockWorkspace(location.workspacePath, lost);
+      release = async () => { try { await unlockWorkspace(); } finally { await unlockRoot(); } };
+      // Re-read under lock; a saved selection is not runner ownership.
+      if (selected) {
+        const current = new RunStore(root, selected.tag).load();
+        if (JSON.stringify(current) !== JSON.stringify(selected)) throw new Error("Run changed while awaiting approval. Select it again.");
       }
-      const config = loadConfig(ctx.cwd);
       ensureSearchConfigured(config.searchProvider);
-      const backend = new PythonBackend(ctx.cwd);
-      const driver = await PiWorkerDriver.create(ctx);
+      const backend = new PythonBackend(location.workspacePath);
+      const driver = await PiWorkerDriver.create(ctx, location.workspacePath);
       lifecycle.signal.throwIfAborted();
       if (query !== undefined || revision) {
-        if (!ctx.model) throw new Error("Select an authenticated model first");
+        if (!selected && !ctx.model) throw new Error("Select an authenticated model first");
         active = revision
-          ? await ResearchRunner.revise(ctx.cwd, new RunStore(ctx.cwd, revision.tag).load(), revision.feedback, config,
-            `${ctx.model.provider}/${ctx.model.id}`, ctx.thinkingLevel ?? "medium", backend, driver, state => show(state, ctx))
-          : await ResearchRunner.create(ctx.cwd, query!, config, `${ctx.model.provider}/${ctx.model.id}`, ctx.thinkingLevel ?? "medium",
-            backend, driver, state => show(state, ctx));
+          ? await ResearchRunner.revise(location.projectPath, selected!, revision.feedback, config,
+            selected!.model, selected!.thinking, backend, driver, state => show(state, ctx))
+          : await ResearchRunner.create(location.projectPath, query!, config, `${ctx.model!.provider}/${ctx.model!.id}`, ctx.thinkingLevel ?? "medium",
+            backend, driver, state => show(state, ctx), undefined, location);
       } else {
-        const state = resolveState(ctx, resumeTag);
-        state.config = config; // Explicit resume picks up budget/provider/model changes.
-        active = new ResearchRunner(ctx.cwd, state, backend, driver, current => show(current, ctx));
+        active = new ResearchRunner(location.projectPath, new RunStore(root, selected!.tag).load(), backend, driver, current => show(current, ctx));
       }
       if (lifecycle.signal.aborted) { active.stop("paused"); throw new Error("Session ended during research setup"); }
       const runner = active;
@@ -173,13 +177,14 @@ export default function hyperresearch(pi: ExtensionAPI) {
           } else {
             launching = true;
             startup = (async () => {
-              const unlock = await lockfile.lock(ctx.cwd, { lockfilePath: join(ctx.cwd, ".hyperresearch-runner.lock"), retries: 0, stale: 30_000 });
+              const unlock = await lockDataRoot(dataRoot());
               try {
                 lifecycle.signal.throwIfAborted();
                 const selected = resolveState(ctx);
-                const store = new RunStore(ctx.cwd, selected.tag);
+                const store = new RunStore(dataRoot(), selected.tag);
                 const state = store.load(); // Re-read under lock, not a cached view.
                 if (state.status === "running") throw new Error("Resume the interrupted run explicitly before steering it");
+                requireLocation(state, dataRoot());
                 const note = queueFeedback(state, feedback); store.save(state); show(state, ctx);
                 say(ctx, `Feedback ${note.id} queued for ${state.tag}. /hyperresearch resume applies it and replans; no workers started.`);
               } finally { await unlock(); }
@@ -196,7 +201,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
           trusted(ctx);
           const state = resolveState(ctx, argument || undefined);
           if (command === "status") { show(state, ctx); say(ctx, `${state.tag}: ${state.status}${state.reason ? ` — ${state.reason}` : ""}\nSteering: ${feedbackSummary(state)}${state.feedback.length ? "\n" + state.feedback.map(f => `${f.id}. ${f.status}: ${f.text}`).join("\n") : ""}`); return; }
-          if (command === "snapshot") { await open(pathToFileURL(join(ctx.cwd, "research", "runs", state.tag, "dashboard.html")).href, ctx); return; }
+          if (command === "snapshot") { await open(pathToFileURL(join(new RunStore(dataRoot(), state.tag).dir, "dashboard.html")).href, ctx); return; }
           if (dashboardOpening) throw new Error("Dashboard is already opening");
           dashboardOpening = (async () => {
             lifecycle.signal.throwIfAborted();
@@ -247,15 +252,16 @@ export default function hyperresearch(pi: ExtensionAPI) {
         "Direct the user to /hyperresearch steer <feedback> or /hyperresearch revise <tag> <feedback> for changes.",
       message: { customType: "hyperresearch-context", display: false, content: JSON.stringify({
         tag: state.tag, status: state.status, liveInThisSession: !!active, activity: state.activity,
-        steering: feedbackSummary(state), checkpoint: join(ctx.cwd, "research", "runs", state.tag, "pi-state.json"),
-        report: new RunStore(ctx.cwd, state.tag).reportPath,
+        steering: feedbackSummary(state), checkpoint: join(new RunStore(dataRoot(), state.tag).dir, "pi-state.json"),
+        report: new RunStore(dataRoot(), state.tag).reportPath,
       }) },
     };
   });
   pi.on("session_start", (_event, ctx) => {
     lifecycle = new AbortController();
     if (ctx.isProjectTrusted()) {
-      latest = listRuns(ctx.cwd)[0];
+      // Do not inject an unrelated project's latest investigation into chat.
+      latest = listRuns(dataRoot()).find(state => state.location?.projectPath === realpathSync(ctx.cwd));
       if (latest) {
         // Persisted running means only 'last known running' until explicitly resumed.
         if (latest.status === "running") { latest = structuredClone(latest); latest.reason = "Last recorded as running. Resume explicitly; this session is not running it."; }

@@ -27,7 +27,7 @@ export interface WorkerDriver {
 
 export class PiWorkerDriver implements WorkerDriver {
   constructor(readonly cwd: string, private runtime: ModelRuntime) {}
-  static async create(ctx: ExtensionContext): Promise<PiWorkerDriver> {
+  static async create(ctx: ExtensionContext, workspace = ctx.cwd): Promise<PiWorkerDriver> {
     const runtime = await ModelRuntime.create({
       authPath: `${getAgentDir()}/auth.json`, modelsPath: `${getAgentDir()}/models.json`,
       signal: AbortSignal.timeout(30_000),
@@ -39,7 +39,7 @@ export class PiWorkerDriver implements WorkerDriver {
       if (native) runtime.registerNativeProvider(native);
       if (config) runtime.registerProvider(id, config);
     }
-    return new PiWorkerDriver(ctx.cwd, runtime);
+    return new PiWorkerDriver(workspace, runtime);
   }
   private model(state: RunState, role: Role) {
     const spec = state.config.models[role] ?? state.model;

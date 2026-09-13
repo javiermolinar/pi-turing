@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Backend, BackendAction } from "../src/backend.ts";
 import { ResearchRunner } from "../src/runner.ts";
+import { createLocation } from "../src/paths.ts";
 import { configSchema, type RunState } from "../src/types.ts";
 import type { WorkRequest, WorkerDriver } from "../src/worker.ts";
 import { fixture } from "./fixtures.ts";
@@ -55,7 +56,7 @@ class FakeDriver implements WorkerDriver {
 async function setup() {
   const cwd = mkdtempSync(join(tmpdir(), "hpr-runner-"));
   const backend = new FakeBackend(); const driver = new FakeDriver();
-  const runner = await ResearchRunner.create(cwd, "Verbatim question?", configSchema.parse({}), "test/mock", "off", backend, driver);
+  const runner = await ResearchRunner.create(cwd, "Verbatim question?", configSchema.parse({}), "test/mock", "off", backend, driver, undefined, undefined, createLocation(cwd, cwd));
   return { cwd, backend, driver, runner, cleanup: () => rmSync(cwd, { recursive: true, force: true }) };
 }
 

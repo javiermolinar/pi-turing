@@ -5,7 +5,8 @@ import type { Backend } from "./backend.ts";
 import { ReadCoverage } from "./coverage.ts";
 import { queueFeedback } from "./feedback.ts";
 import { applyPatch, citationIds } from "./patch.ts";
-import { RunStore } from "./store.ts";
+import { RunStore, materializeBackend } from "./store.ts";
+import { createLocation, privateDirectory } from "./paths.ts";
 import type { WorkerDriver, WorkerTool } from "./worker.ts";
 import {
   checkSchema, configSchema, decompositionSchema, draftSchema, message, now,
@@ -29,13 +30,15 @@ export class ResearchRunner {
   readonly store: RunStore;
   constructor(readonly cwd: string, readonly state: RunState, private backend: Backend,
     private driver: WorkerDriver, private onChange: (state: RunState) => void = () => {}) {
-    this.store = new RunStore(cwd, state.tag);
+    this.store = new RunStore(state.location?.dataRoot ?? cwd, state.tag);
   }
   static async create(cwd: string, query: string, config: Config, model: string, thinking: RunState["thinking"],
     backend: Backend, driver: WorkerDriver, onChange?: (state: RunState) => void,
-    seed?: { revision: RunState["revision"]; feedback: string }): Promise<ResearchRunner> {
+    seed?: { revision: RunState["revision"]; feedback: string },
+    location = createLocation(cwd)): Promise<ResearchRunner> {
     if (seed) { revisionSchema.parse(seed.revision); feedbackTextSchema.parse(seed.feedback); }
     if (!query.trim() || query.length > 30_000) throw new Error("Research query must contain 1–30,000 characters");
+    privateDirectory(location.workspacePath);
     const profile = z.object({ sourceMin: z.number().int().min(1).max(30), wordTarget: z.tuple([z.number(), z.number()]) }).parse(await backend.call("init"));
     if (config.sourceTarget < profile.sourceMin) throw new Error(`sourceTarget must be at least ${profile.sourceMin}`);
     const slug = query.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "") || "research";
@@ -45,7 +48,7 @@ export class ResearchRunner {
       elapsedMs: 0, config: configSchema.parse(config), model, thinking, ...profile,
       steps: Object.fromEntries(stepIds.map(id => [id, "pending"])), workers: [], sources: [], failures: [],
       cost: 0, tokens: 0, pricingKnown: false, research: [], patches: {}, checks: [], feedback: [],
-      revision: seed?.revision,
+      revision: seed?.revision, location,
     };
     if (seed) queueFeedback(state, seed.feedback);
     state.pricingKnown = await driver.checkModels(state);
@@ -61,7 +64,7 @@ export class ResearchRunner {
       parentTag: parent.tag, report: parent.report, sourceIds: parent.sources.map(s => s.id),
       instructions: [...(parent.revision?.instructions ?? []), ...parent.feedback.filter(f => f.status === "applied").map(f => f.text)],
     });
-    return this.create(cwd, parent.query, config, model, thinking, backend, driver, onChange, { revision, feedback });
+    return this.create(cwd, parent.query, config, model, thinking, backend, driver, onChange, { revision, feedback }, parent.location);
   }
   steer(text: string) {
     this.abortController.signal.throwIfAborted();
@@ -94,6 +97,7 @@ export class ResearchRunner {
     if (this.state.status === "running") this.state.elapsedMs += Math.max(0, timestamp - this.lastTick);
     this.lastTick = timestamp;
     this.store.save(this.state);
+    materializeBackend(this.state);
     this.onChange(this.state);
   }
   async run(): Promise<void> {

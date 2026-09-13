@@ -57,7 +57,7 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         manifest = json.loads(Path("research/runs/test-run/run.json").read_text())
         self.assertEqual(manifest["status"], "blocked")
-        self.assertEqual(bridge.dispatch("retractions", {"tag": "test-run"})["checked"], 0)
+        self.assertEqual(bridge.dispatch("retractions", {"tag": "test-run", "providers": ["openalex"]})["checked"], 0)
 
     def test_fetch_and_reuse_through_real_cli(self):
         from unittest.mock import patch

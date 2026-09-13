@@ -43,6 +43,7 @@ export const sourceSchema = z.object({
   id: z.string(), title: z.string(), url: z.string(), words: z.number(),
   retrievedAt: z.string().optional(), contentHash: z.string().optional(), fullRead: z.boolean().default(false),
   oa: z.unknown().optional(),
+  resolverCoverage: z.array(z.object({ resolver: z.enum(["unpaywall", "europepmc", "core"]), available: z.boolean(), reason: z.string().nullable() })).max(3).optional(),
 });
 export type Source = z.infer<typeof sourceSchema>;
 const workerSchema = z.object({

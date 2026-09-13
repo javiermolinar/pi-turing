@@ -215,8 +215,13 @@ CORE requires `CORE_API_KEY`; FRED requires `FRED_API_KEY`; EDGAR requires
 persisted in results or logs; FRED's required query key is used only in the request.
 RePEc has no usable upstream search API here and is not an enabled adapter. Optional
 `HYPERRESEARCH_CONTACT_EMAIL` supplies the providers' courtesy contact parameter.
-This controls discovery only; the temporary Python full-text resolver and metadata
-refresh still need their own approval/routing work in later milestones.
+Full-text recovery has a separate `fullTextResolvers` allowlist (default `[]`):
+`unpaywall`, `europepmc`, and `core`. Unpaywall needs
+`HYPERRESEARCH_CONTACT_EMAIL`; CORE needs `CORE_API_KEY`. Missing credentials are
+reported, not substituted from another provider. Resolver availability is not a
+successful extraction. The temporary retraction gate requires approved OpenAlex;
+its upstream Semantic Scholar fallback is disabled. No resolver is enabled by
+merely selecting a discovery provider.
 
 Results retain identifiers/DOIs, authors/dates, work type, version-aware full-text
 candidates, provider-specific citation counts, retraction/correction notices and

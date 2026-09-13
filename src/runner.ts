@@ -239,8 +239,10 @@ export class ResearchRunner {
           if (++this.attempts > 90 || this.state.failures.length >= 90) throw new Error("Fetch attempt cap reached");
           if (this.state.sources.length >= 30) throw new Error("Run source cap reached (30)");
           try {
-            const fetched = z.object({ note_id: z.string() }).parse(await this.backend.call("fetch_source", { ...args, tag: this.state.tag, resolvers: this.state.config.fullTextResolvers }, signal));
-            return await sourcePage(fetched.note_id, 0, signal);
+            const fetched = z.object({ note_id: z.string(), resolverCoverage: sourceSchema.shape.resolverCoverage }).parse(await this.backend.call("fetch_source", { ...args, tag: this.state.tag, resolvers: this.state.config.fullTextResolvers }, signal));
+            const page = await sourcePage(fetched.note_id, 0, signal);
+            if (fetched.resolverCoverage) this.state.sources.find(source => source.id === fetched.note_id)!.resolverCoverage = fetched.resolverCoverage;
+            this.save(); return { ...page, resolverCoverage: fetched.resolverCoverage };
           } catch (error) {
             if (!signal.aborted) { this.state.failures.push({ url: args.url, error: message(error), at: now() }); this.save(); }
             throw error;

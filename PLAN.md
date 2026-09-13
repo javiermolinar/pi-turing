@@ -585,8 +585,9 @@ absent. Keep regression coverage for the working light pipeline throughout.
 - [x] Add approved OpenAlex/Crossref discovery routing, versioned full-text
       candidates, courtesy limits, caching, deadlines, cancellation, and visible
       partial failures; persist batches without counting metadata as full reads.
-- [ ] Extend routing/resolution and credentials contracts to additional providers
-      and Python-composed acquisition/resolver operations.
+- [x] Extend routing/resolution and credentials contracts to additional providers
+      and Python-composed acquisition/resolver operations. Recovery defaults off;
+      retraction metadata cannot silently fall back to Semantic Scholar.
 - [x] Test work-type distinctions, missing credentials, false merges, retractions,
       incomplete results, and the rule that abstracts/snippets are not full reads.
 - [ ] Run explicitly approved adapter smoke tests and document actual coverage;

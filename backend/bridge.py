@@ -11,6 +11,8 @@ import hashlib
 import importlib.metadata
 import io
 import json
+import os
+import re
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -57,6 +59,20 @@ def require_url(url: str):
         raise ValueError("Only HTTP(S) URLs without embedded credentials are allowed")
 
 
+def resolver_coverage(resolvers):
+    if not isinstance(resolvers, list) or any(value not in ("unpaywall", "europepmc", "core") for value in resolvers):
+        raise ValueError("Invalid approved resolver list")
+    result = []
+    for name in dict.fromkeys(resolvers):
+        required = {"unpaywall": "HYPERRESEARCH_CONTACT_EMAIL", "core": "CORE_API_KEY"}.get(name)
+        value = os.environ.get(required, "") if required else ""
+        available = not required or bool(value and not re.search(r"[\x00-\x20\x7f]", value))
+        if name == "unpaywall":
+            available = available and bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value))
+        result.append({"resolver": name, "available": available, "reason": None if available else f"Requires {required}"})
+    return result
+
+
 def dispatch(action: str, args: dict):
     from hyperresearch.core.vault import Vault
 
@@ -91,7 +107,18 @@ def dispatch(action: str, args: dict):
             vault.auto_sync()
             return runs.finish_run(vault, args["tag"])["verify"]
         if action == "retractions":
-            return cli(["sources", "retractions", "--tag", args["tag"], "--json"])
+            # Upstream silently falls back to Semantic Scholar. It is not an
+            # approved provider here; block it before cache access or transport.
+            from hyperresearch.core import scholar
+            if "openalex" not in args.get("providers", []):
+                raise ValueError("Retraction refresh requires approved OpenAlex; no provider was enabled")
+            fetch_json = scholar._fetch_json
+            def approved_metadata(conn, url, *pos, **kw):
+                if urlparse(url).hostname != "api.openalex.org":
+                    return None
+                return fetch_json(conn, url, *pos, **kw)
+            with patch.object(scholar, "_fetch_json", side_effect=approved_metadata):
+                return cli(["sources", "retractions", "--tag", args["tag"], "--json"])
         if action == "vault_search":
             return cli(["search", "--no-body", "--limit", "10", "--json", "--", args["query"]])
         if action == "scholar_search":
@@ -112,7 +139,24 @@ def dispatch(action: str, args: dict):
                 if not vault.db.execute("SELECT id FROM notes WHERE id = ?", (args["suggestedBy"],)).fetchone():
                     raise ValueError("Unknown suggestedBy note")
                 command += ["--suggested-by", args["suggestedBy"]]
-            return cli([*command, "--", url])
+            from hyperresearch.core import oa
+            coverage = resolver_coverage(args.get("resolvers", []))
+            resolvers = [item["resolver"] for item in coverage if item["available"]]
+            candidates = oa.iter_oa_candidates
+            def approved_candidates(conn, doi, ttl_days, **kwargs):
+                kwargs["email"] = os.environ.get("HYPERRESEARCH_CONTACT_EMAIL") if "unpaywall" in resolvers else None
+                return candidates(conn, doi, ttl_days, **kwargs)
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(patch.object(oa, "iter_oa_candidates", side_effect=approved_candidates))
+                for name, attribute, empty in [
+                    ("unpaywall", "_unpaywall_candidates", []),
+                    ("europepmc", "_resolve_europepmc", None),
+                    ("core", "_core_candidates", []),
+                ]:
+                    if name not in resolvers:
+                        stack.enter_context(patch.object(oa, attribute, return_value=empty))
+                result = cli([*command, "--", url])
+                return {**result, "resolverCoverage": coverage}
         if action == "read_source":
             from hyperresearch.core.untrusted import wrap_body
             note_id = args["id"]

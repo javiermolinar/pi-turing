@@ -294,7 +294,7 @@ def dispatch(action: str, args: dict):
                         stack.enter_context(patch.object(oa, attribute, return_value=empty))
                 result = cli([*command, "--", url])
                 return {**result, "resolverCoverage": coverage}
-        if action == "read_source":
+        if action in ("read_source", "check_passage", "source_fingerprint"):
             from hyperresearch.core.untrusted import wrap_body
             note_id = args["id"]
             meta = cli(["note", "show", "--meta", "--json", "--", note_id])
@@ -303,6 +303,21 @@ def dispatch(action: str, args: dict):
                 raise ValueError("Generated synthesis is not a primary source; read its source notes instead")
             row = vault.db.execute("SELECT body FROM note_content WHERE note_id = ?", (note_id,)).fetchone()
             body = row["body"]
+            content_hash = hashlib.sha256(body.encode()).hexdigest()
+            if action == "check_passage":
+                text = args.get("text")
+                if not isinstance(text, str) or not 1 <= len(text) <= 1600:
+                    raise ValueError("Invalid evidence passage")
+                found = body.find(text)
+                matched = content_hash == args.get("hash") and found >= 0
+                return {"matched": matched, "hash": content_hash, "offset": found if matched else None, "units": "unicode"}
+            if action == "source_fingerprint":
+                if content_hash != args.get("hash"):
+                    raise ValueError("Source changed since its complete read")
+                words = re.findall(r"\w+", body.lower())
+                stride = max(1, (max(0, len(words) - 4) + 19_999) // 20_000)
+                shingles = {hashlib.sha256(" ".join(words[i:i+5]).encode()).hexdigest()[:16] for i in range(0, max(0, len(words) - 4), stride)}
+                return {"hash": content_hash, "shingles": sorted(shingles)[:64]}
             offset = args.get("offset", 0)
             if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0 or offset > len(body):
                 raise ValueError("Invalid source offset")

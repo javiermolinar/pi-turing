@@ -10,9 +10,9 @@ export class ReadCoverage {
     note.ranges.push([start, end]);
     return this.complete(id);
   }
-  complete(id: string): boolean {
+  complete(id: string, hash?: string): boolean {
     const note = this.notes.get(id);
-    if (!note || note.total === 0) return false;
+    if (!note || note.total === 0 || (hash !== undefined && note.hash !== hash)) return false;
     let covered = 0;
     for (const [start, end] of [...note.ranges].sort((a, b) => a[0] - b[0])) {
       if (start > covered) return false;

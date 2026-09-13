@@ -34,13 +34,16 @@ test("real Pi SDK worker submits structured output without inheriting project to
     const driver = new PiWorkerDriver(cwd, runtime);
     const state = fixture();
     assert.equal(await driver.checkModels(state), true);
-    let tokens = 0;
+    let tokens = 0, validations = 0;
     const result = await driver.run({ id: "test", role: "decompose", prompt: "Return answer ok.", resultSchema: z.object({ answer: z.string() }),
+      async validateResult() { await new Promise(resolve => setTimeout(resolve, 10)); if (++validations === 1) throw new Error("Preserved-text verification rejected the first submission"); },
       tools: [], signal: AbortSignal.timeout(10_000), onActivity() {}, onTurn() {}, onUsage(t) { tokens += t; } }, state);
     assert.deepEqual(result, { answer: "ok" });
     assert.deepEqual(payload.tools.map((t: any) => t.function.name), ["submit_result"]);
     assert.ok(!JSON.stringify(payload).includes("SECRET_PROJECT_PROMPT_SHOULD_NOT_LOAD"));
-    assert.equal(tokens, 20);
+    assert.equal(validations, 2);
+    assert.match(JSON.stringify(payload), /Preserved-text verification rejected/);
+    assert.equal(tokens, 40);
   } finally {
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     rmSync(cwd, { recursive: true, force: true });

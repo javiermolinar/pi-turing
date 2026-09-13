@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { execute } from "./process.ts";
 
-export type BackendAction = "doctor" | "init" | "create_run" | "set_step" | "set_status" | "finish" | "retractions" | "vault_search" | "scholar_search" | "web_search" | "fetch_source" | "read_source";
+export type BackendAction = "doctor" | "init" | "create_run" | "set_step" | "set_status" | "finish" | "retractions" | "vault_search" | "scholar_search" | "web_search" | "fetch_source" | "read_source" | "check_passage" | "source_fingerprint";
 export interface Backend {
   call<T = unknown>(action: BackendAction, args?: Record<string, unknown>, signal?: AbortSignal): Promise<T>;
 }

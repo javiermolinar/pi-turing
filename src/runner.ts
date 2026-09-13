@@ -218,7 +218,7 @@ export class ResearchRunner {
       `This is a light-mode test port, not the full adversarial pipeline. Never claim full citation verification.\n\n${task}`;
   }
   private async work(role: Role, task: string, prompt: string, schema: z.ZodType,
-    tools: WorkerTool[] = [], validateResult?: (result: unknown) => void): Promise<unknown> {
+    tools: WorkerTool[] = [], validateResult?: (result: unknown, signal: AbortSignal) => void | Promise<void>): Promise<unknown> {
     this.abortController.signal.throwIfAborted();
     this.validateInputs();
     const worker: Worker = { id: `${role}-${this.state.workers.length + 1}`, role, task, status: "running", startedAt: now(), turns: 0, tokens: 0, cost: 0 };
@@ -227,7 +227,7 @@ export class ResearchRunner {
     try {
       const result = await this.driver.run({
         id: worker.id, role, prompt: this.instructions(prompt, role), resultSchema: schema, tools, signal,
-        validateResult,
+        validateResult: result => validateResult?.(result, signal),
         onActivity: activity => { worker.activity = activity; this.activity(`${worker.id}: ${activity}`); this.save(); },
         onTurn: () => { this.validateInputs(); worker.turns++; worker.activity = "Waiting for model"; this.activity(`${worker.id}: Waiting for model`); this.save(); },
         onUsage: (tokens, cost) => {
@@ -240,7 +240,8 @@ export class ResearchRunner {
         },
       }, this.state);
       signal.throwIfAborted();
-      const parsed = schema.parse(result); validateResult?.(parsed);
+      const parsed = schema.parse(result); await validateResult?.(parsed, signal);
+      signal.throwIfAborted();
       worker.status = "done"; return parsed;
     } catch (error) {
       worker.status = this.abortController.signal.aborted ? "interrupted" : "failed";

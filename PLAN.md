@@ -635,6 +635,11 @@ absent. Keep regression coverage for the working light pipeline throughout.
 
 ### M4 — Investigation depth and auditing
 
+- [x] Add tested host-side audit foundations: exact raw-text passage proofs after
+      hash-matched complete reads, bounded prose-block coverage, explicit unresolved
+      findings, and conservative content/URL/DOI/near-copy relationship signals.
+      Async result validation is awaited before accepting worker output. These
+      helpers are not yet scheduled research stages or a semantic parity result.
 - [ ] Add contradiction mapping, bounded depth tasks, reconciliation, and a
       structured evidence digest with traceable claims and exact passages.
 - [ ] Add corpus critique, targeted gap retrieval, and source-independence analysis.

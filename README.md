@@ -469,6 +469,21 @@ file reads, or write/edit tools. This is capability restriction, not an OS sandb
 - Backend HTTP egress inherits upstream's public-address/redirect checks and
   documented residual DNS-rebinding risk. Use network isolation for hostile input.
 
+### M4 audit foundations (not yet scheduled)
+
+`src/audit.ts` separates exact preserved-text passage checks from semantic support
+judgments. It rejects incomplete or changed reads, wrapper text presented as
+quotes, revoked local evidence, missing citation bindings and unverified report
+quotations. Block-based prose coverage is bounded and never silently sampled;
+code/display-math exclusions are explicit, and raw HTML requires rewriting.
+Content, URL, DOI and near-copy relationships are conservative grouping signals,
+not proof that remaining sources are independent. Async worker validation must
+finish before a result is accepted.
+
+These contracts have offline fixtures, but no semantic audit or independence
+stage currently runs in the research pipeline. Model assessment, persistent stage
+coverage, corrections, re-audit and comparative evaluations remain unfinished.
+
 ## Development and tests
 
 ```bash

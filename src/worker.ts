@@ -18,7 +18,7 @@ export interface WorkRequest {
   onActivity(text: string): void;
   onUsage(tokens: number, cost: number): void;
   onTurn(): void;
-  validateResult?(result: unknown): void;
+  validateResult?(result: unknown): void | Promise<void>;
 }
 export interface WorkerDriver {
   checkModels(state: RunState): Promise<boolean>;
@@ -76,7 +76,7 @@ export class PiWorkerDriver implements WorkerDriver {
     });
     await loader.reload();
     let result: unknown;
-    let submitted = false;
+    let submitted = false, submitting = false;
     let turns = 0;
     let usageFailure: unknown;
     const tools = request.tools.map(spec => defineTool({
@@ -99,10 +99,14 @@ export class PiWorkerDriver implements WorkerDriver {
       parameters: Type.Unsafe<Record<string, unknown>>({ type: "object", properties: { result: jsonSchema }, required: ["result"], additionalProperties: false }),
       async execute(_id, args) {
         request.signal.throwIfAborted();
-        if (submitted) throw new Error("Result already submitted");
-        const parsed = request.resultSchema.parse(args.result);
-        request.validateResult?.(parsed);
-        result = parsed; submitted = true;
+        if (submitted || submitting) throw new Error("Result already submitted or validation in progress");
+        submitting = true;
+        try {
+          const parsed = request.resultSchema.parse(args.result);
+          await request.validateResult?.(parsed);
+          request.signal.throwIfAborted();
+          result = parsed; submitted = true;
+        } finally { submitting = false; }
         return { content: [{ type: "text" as const, text: "Result accepted." }], details: undefined, terminate: true };
       },
     }));

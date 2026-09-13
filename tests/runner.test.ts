@@ -53,7 +53,7 @@ class FakeDriver implements WorkerDriver {
     }
     if (request.role === "polish") result = { summary: "Clarity", edits: state.report?.includes("Awkward sentence.") ? [{ oldText: "Awkward sentence.", newText: "Clear sentence.", reason: "Clarity" }] : [] };
     if (request.role === "readability") result = { summary: "No additional changes", edits: [] };
-    request.resultSchema.parse(result); request.validateResult?.(result); return result;
+    request.resultSchema.parse(result); await request.validateResult?.(result); return result;
   }
 }
 

@@ -523,10 +523,12 @@ absent. Keep regression coverage for the working light pipeline throughout.
       references, and revision lineage; support old checkpoints explicitly.
 - [x] Implement a filesystem-based inventory and central run-ID resolver; do not
       add an inventory database.
-- [ ] Add explicit migration preview, locks, staged copy/validation, collision
+- [x] Add explicit migration preview, locks, staged copy/validation, collision
       refusal, rollback, and original-preservation behavior.
-- [ ] Test loading from another cwd, package relocation, missing/corrupt runs,
-      shared workspaces, lock ownership, and interrupted migration.
+- [x] Test cwd-independent loading, missing/corrupt runs, shared workspaces,
+      lock ownership, and interrupted migration (including a killed process).
+- [ ] Add a relocated-package integration test; package paths currently resolve
+      from import.meta.url independently of state.
 - [ ] Test that view/list/search never resume work or replace saved context.
 
 ### M1b — Pi run picker

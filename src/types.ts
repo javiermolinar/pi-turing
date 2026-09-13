@@ -63,6 +63,7 @@ export const revisionSchema = z.object({
 });
 export const stateSchema = z.object({
   version: z.literal(1), tag: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/),
+  migrationId: z.string().uuid().optional(),
   location: z.object({
     projectPath: z.string().refine(isAbsolute), dataRoot: z.string().refine(isAbsolute),
     workspaceId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/), workspacePath: z.string().refine(isAbsolute),

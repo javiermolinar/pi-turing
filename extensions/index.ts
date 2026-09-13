@@ -14,6 +14,7 @@ import { ResearchWidget } from "../src/widget.ts";
 import { listRuns, loadConfig, RunStore } from "../src/store.ts";
 import { createLocation, dataRoot, requireLocation } from "../src/paths.ts";
 import { lockDataRoot, lockWorkspace } from "../src/locks.ts";
+import { migrateLegacy, previewMigration, rollbackMigration } from "../src/migration.ts";
 import { cleanTerminal, configSchema, feedbackTextSchema, message, type RunState } from "../src/types.ts";
 import { PiWorkerDriver } from "../src/worker.ts";
 
@@ -28,6 +29,8 @@ const help = `Hyperresearch — light pipeline (experimental)
 /hyperresearch dashboard [tag]   Open live localhost dashboard
 /hyperresearch snapshot [tag]    Open saved standalone HTML
 /hyperresearch setup             Install the pinned backend with uv
+/hyperresearch migrate [apply]   Preview/copy this checkout's legacy runs
+/hyperresearch migrate rollback <id>  Roll back an unchanged migration
 
 A bare question also starts a run. Config: .pi/hyperresearch.json.
 Only light mode is implemented. Default model-cost ceiling: ~$15.
@@ -150,7 +153,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
 
   pi.registerCommand("hyperresearch", {
     description: "Research with a persistent vault and live/offline HTML dashboard",
-    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup"]
+    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup", "migrate", "help"]
       .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
     handler: async (args, ctx) => {
       try {
@@ -158,6 +161,25 @@ export default function hyperresearch(pi: ExtensionAPI) {
         const [command, ...rest] = input.split(/\s+/);
         const argument = rest.join(" ");
         if (!input || command === "help") { say(ctx, help); return; }
+        if (command === "migrate") {
+          trusted(ctx);
+          if (active || launching) throw new Error("Stop research before migration");
+          if (rest[0] === "rollback" && rest.length === 2) {
+            if (ctx.hasUI && !await ctx.ui.confirm("Roll back migration?", "Remove unchanged migrated copies only; preserve originals. Changed destinations are refused.")) return;
+            launching = true;
+            startup = rollbackMigration(dataRoot(), rest[1]);
+          } else {
+            if (argument && argument !== "apply") throw new Error("Usage: migrate [apply] or migrate rollback <id>");
+            const preview = previewMigration(ctx.cwd, dataRoot());
+            say(ctx, JSON.stringify(preview, null, 2));
+            if (argument !== "apply") { say(ctx, "Preview only. Use /hyperresearch migrate apply to copy and validate; originals remain."); return; }
+            if (ctx.hasUI && !await ctx.ui.confirm("Copy legacy runs?", "Copy and validate the previewed workspace and runs. Stop upstream CLI writers first. Originals remain; no workers or network calls start.")) return;
+            launching = true;
+            startup = migrateLegacy(preview, { signal: lifecycle.signal }).then(id => { say(ctx, `Migration complete: ${id}. Originals preserved.`); });
+          }
+          try { await startup; } finally { launching = false; }
+          return;
+        }
         if (command === "setup") {
           trusted(ctx);
           if (active || launching) throw new Error("Stop the run before updating the backend");

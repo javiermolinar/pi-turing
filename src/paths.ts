@@ -35,7 +35,7 @@ export function privateDirectory(path: string): void {
     mkdirSync(path, { mode: 0o700 });
   }
 }
-export function createLocation(project: string, root = dataRoot(), workspaceId = randomUUID()): NonNullable<RunState["location"]> {
+export function createLocation(project: string, root = dataRoot(), workspaceId: string = randomUUID()): NonNullable<RunState["location"]> {
   validateId(workspaceId);
   return { projectPath: realpathSync(project), dataRoot: resolve(root), workspaceId,
     workspacePath: join(resolve(root), "workspaces", workspaceId), contextRefs: [], approvalRefs: [] };

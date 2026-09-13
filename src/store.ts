@@ -32,6 +32,10 @@ export class RunStore {
     if (!stat.isFile() || stat.size > 8_000_000) throw new Error("Invalid or oversized checkpoint");
     const state = stateSchema.parse(JSON.parse(readFileSync(path, "utf8")));
     if (state.tag !== this.tag) throw new Error("Run tag does not match state file");
+    if (state.migrationId) {
+      const journal = JSON.parse(readFileSync(safePath(this.root, "migrations", `${state.migrationId}.json`), "utf8"));
+      if (journal.status !== "complete") throw new Error(`Migration ${state.migrationId} is incomplete; rollback before retrying`);
+    }
     return state;
   }
   archiveDraft(feedbackId: number, report: string): void {

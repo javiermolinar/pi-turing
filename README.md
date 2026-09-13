@@ -273,6 +273,36 @@ a heartbeat. Avoid running the upstream CLI's mutating commands concurrently;
 it does not participate in that lock. One interrupted source fetch may leave
 backend artifacts requiring inspection.
 
+### Migrate checkout-local runs
+
+Stop active Pi research and upstream CLI writers first. Migration never runs on
+reload or startup and never deletes the original checkout's data.
+
+```text
+/hyperresearch migrate                 # Preview current checkout -> central root
+/hyperresearch migrate apply           # Lock, copy, hash-validate, publish
+/hyperresearch migrate rollback <id>   # Refuses copies changed since migration
+```
+
+For development/automation:
+
+```sh
+npm run migrate -- --source /absolute/checkout
+npm run migrate -- --source /absolute/checkout --apply
+npm run migrate -- --rollback <migration-id> --apply
+```
+
+Use `--data-root /absolute/path` or `HYPERRESEARCH_DATA_ROOT` for an override.
+Migration preserves run IDs, source/assets, archived drafts and revision lineage;
+a shared legacy workspace is copied once, not once per run. Symlinks, collisions,
+oversized inputs, and nonempty SQLite WAL files are refused. Checkpoints become
+visible only after all copies publish. An interrupted operation retains a journal
+under `migrations/`; after stale locks expire, explicit rollback removes only
+unchanged destinations so a fresh preview/apply can retry. The copy deadline is
+five minutes; limits are 100,000 files and 5 GB per source tree, 1 GB per file.
+Migration receipts contain hashes and paths, not credentials. Originals and copies
+are independent after migration; do not resume both expecting synchronization.
+
 ## Enforcement and limitations
 
 Workers get only scoped research tools and a validated result-submission tool.

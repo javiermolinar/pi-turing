@@ -10,6 +10,7 @@
   "files": ["extensions", "src", "skills", "backend/bridge.py", "backend/pyproject.toml", "backend/uv.lock", "README.md", "PLAN.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
+    "migrate": "tsx scripts/migrate.ts",
     "typecheck": "tsc --noEmit",
     "test:backend": "uv run --project backend --locked python -m unittest discover -s tests -p '*_test.py'",
     "test:browser": "tsx scripts/preview.ts"

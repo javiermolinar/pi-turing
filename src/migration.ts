@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, lstatSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { chmod, copyFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { createLocation, legacyWorkspaceId, privateDirectory, safePath, validateId } from "./paths.ts";
+import { canonicalPath, createLocation, legacyWorkspaceId, privateDirectory, safePath, validateId } from "./paths.ts";
 import { lockDataRoot, lockWorkspace } from "./locks.ts";
 import { atomicWrite, RunStore } from "./store.ts";
 import { stateSchema } from "./types.ts";
@@ -47,7 +47,8 @@ function legacyState(source: string, tag: string) {
   return state;
 }
 export function previewMigration(source: string, root: string): MigrationPreview {
-  source = resolve(source); root = resolve(root);
+  safePath(source); safePath(root);
+  source = canonicalPath(source); root = canonicalPath(root);
   const overlap = (a: string, b: string) => { const rel = relative(a, b); return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel)); };
   if (overlap(source, root) || overlap(root, source)) throw new Error("Migration source and destination must not overlap");
   safePath(source); safePath(root);
@@ -177,6 +178,7 @@ export async function migrateLegacy(preview: MigrationPreview, options: { signal
   } finally { try { await unlockSource?.(); } finally { await unlockRoot(); } }
 }
 export async function rollbackMigration(root: string, id: string): Promise<void> {
+  safePath(root); root = canonicalPath(root);
   const release = await lockDataRoot(root);
   try {
     const journal = JSON.parse(readFileSync(journalPath(root, id), "utf8")) as Journal;

@@ -11,14 +11,14 @@ import { portableMarkdown } from "./export.ts";
 export interface DashboardServer {
   url: string; publish(state: RunState, runnerLive?: boolean): void; close(): Promise<void>;
 }
-type Scope = { root: string; allowedTags?: ReadonlySet<string> } | { initial: RunState; live: boolean };
+type Scope = { root: string; allowedTags?: ReadonlySet<string> } | { initial: RunState; live: boolean; persistedRoot?: string };
 interface Client { response: ServerResponse; tag: string; line?: number; stamp?: string }
 const metadata = (state: RunState) => ({ tag: state.tag, title: state.decomposition?.title, query: state.query,
   status: state.status, createdAt: state.createdAt, project: state.location?.projectPath });
 
 /** A single-run token can never be upgraded into a central inventory capability. */
-export async function startDashboard(initial: RunState, initialRunnerLive = true): Promise<DashboardServer> {
-  return startServer({ initial: structuredClone(initial), live: initialRunnerLive });
+export async function startDashboard(initial: RunState, initialRunnerLive = true, root = initial.location?.dataRoot): Promise<DashboardServer> {
+  return startServer({ initial: structuredClone(initial), live: initialRunnerLive, persistedRoot: root });
 }
 /** Explicitly grants access to central inventory, or just the supplied run set. */
 export async function startInventory(root: string, allowedTags?: ReadonlySet<string>): Promise<DashboardServer> {
@@ -37,7 +37,7 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
   };
   const load = (tag: string) => {
     if (!allowed(tag)) throw new Error("Not found");
-    return "initial" in scope ? scope.initial : new RunStore(scope.root, tag).load();
+    return "initial" in scope ? scope.persistedRoot ? new RunStore(scope.persistedRoot, tag).load() : scope.initial : new RunStore(scope.root, tag).load();
   };
   const snapshot = (tag: string, line?: number) => {
     const state = load(tag);
@@ -56,7 +56,11 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
       client.stamp = "unavailable";
     }
   };
-  const list = () => "initial" in scope ? { runs: [scope.initial], issues: [], partial: false } : inventory(scope.root, scope.allowedTags);
+  const list = () => {
+    if (!("initial" in scope)) return inventory(scope.root, scope.allowedTags);
+    try { return { runs: [load(scope.initial.tag)], issues: [], partial: false }; }
+    catch { return { runs: [], issues: [], partial: false }; }
+  };
   const server = createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer"); res.setHeader("X-Frame-Options", "DENY");
@@ -108,7 +112,7 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
         searches++;
         try {
           const data = list();
-          const root = "root" in scope ? scope.root : scope.initial.location?.dataRoot;
+          const root = "root" in scope ? scope.root : scope.persistedRoot;
           if (!root) { res.writeHead(400).end("Snapshot has no central report path"); return; }
           const result = await searchReports(root, data.runs.map(state => state.tag), url.searchParams.get("q") ?? "", { signal: controller.signal });
           if (data.partial) { result.partial = true; result.reason ??= "Inventory scan limit reached"; }
@@ -130,7 +134,7 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
   });
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No dashboard address");
   origin = `http://127.0.0.1:${address.port}`;
-  const polling = setInterval(() => { if ("root" in scope) for (const client of clients) send(client); }, 1000); polling.unref();
+  const polling = setInterval(() => { if ("root" in scope || scope.persistedRoot) for (const client of clients) send(client); }, 1000); polling.unref();
   const heartbeat = setInterval(() => { for (const client of clients) if (!client.response.write(": heartbeat\n\n")) client.response.destroy(); }, 15_000); heartbeat.unref();
   return {
     url: `${origin}/${token}/`,

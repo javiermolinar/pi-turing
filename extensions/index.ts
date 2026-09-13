@@ -306,7 +306,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
           dashboardOpening = (async () => {
             lifecycle.signal.throwIfAborted();
             if (!dashboard || dashboardTag !== state.tag) {
-              await dashboard?.close(); dashboard = await startDashboard(state, active?.state.tag === state.tag); dashboardTag = state.tag;
+              await dashboard?.close(); dashboard = await startDashboard(state, active?.state.tag === state.tag, dataRoot()); dashboardTag = state.tag;
             }
             if (lifecycle.signal.aborted) { await dashboard.close(); dashboard = undefined; return; }
             show(state, ctx); await open(command === "export" ? new URL("markdown", dashboard.url).href : dashboard.url, ctx);

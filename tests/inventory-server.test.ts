@@ -25,6 +25,9 @@ test("inventory and search filter every endpoint to the capability's authorized 
       assert.equal((await fetch(new URL("run?id=allowed", instance.url), { method: "POST" })).status, 403);
       assert.equal((await fetch(new URL("search?q=needle", instance.url), { headers: { origin: "https://evil.invalid" } })).status, 403);
     }
+    allowed.report = "Updated from another runner"; new RunStore(root, allowed.tag).save(allowed);
+    const external = await (await fetch(new URL("run?id=allowed", single.url))).json();
+    assert.match(external.html, /Updated from another runner/); assert.match(external.html, /recorded running/);
     const exported = await fetch(new URL("markdown?id=allowed", server.url));
     assert.equal(exported.headers.get("content-disposition"), 'attachment; filename="allowed.md"');
     assert.match(await exported.text(), /UNVERIFIED DRAFT/);

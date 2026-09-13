@@ -64,6 +64,8 @@ test("migration rolls back partial publication and refuses symlinks, collisions,
     symlinkSync(join(env.source, "research", "raw", "source.pdf"), join(env.source, "research", "raw", "alias"));
     assert.throws(() => previewMigration(env.source, env.root), /symlink/);
     assert.throws(() => previewMigration(env.source, join(env.source, "nested")), /overlap/);
+    const alias = join(env.dir, "source-alias"); symlinkSync(env.source, alias);
+    assert.throws(() => previewMigration(env.source, join(alias, "nested-data")), /overlap/);
   } finally { env.cleanup(); }
 });
 

@@ -13,7 +13,8 @@ export type Role = typeof roles[number];
 export const thinkingSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const configSchema = z.object({
   searchProvider: searchProviderSchema.default("brave"),
-  scholarlyProviders: z.array(scholarlyProviderSchema).max(2).default(["openalex", "crossref"]),
+  scholarlyProviders: z.array(scholarlyProviderSchema).max(7).default(["openalex", "crossref"]),
+  fullTextResolvers: z.array(z.enum(["unpaywall", "europepmc", "core"])).max(3).default([]),
   concurrency: z.number().int().min(1).max(4).default(2),
   sourceTarget: z.number().int().min(10).max(30).default(15),
   maxTurns: z.number().int().min(5).max(150).default(80),

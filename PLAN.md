@@ -579,15 +579,15 @@ absent. Keep regression coverage for the working light pipeline throughout.
 - [x] Define the normalized discovery result and provider-capability contract.
 - [x] Consolidate OpenAlex/Crossref results with version-aware, conservative
       deduplication and complete provider provenance.
-- [ ] Integrate CORE/DOAB through existing adapters where suitable.
-- [ ] Integrate ClinicalTrials.gov, EDGAR, and FRED for relevant questions with
+- [x] Integrate CORE/DOAB through existing adapters where suitable.
+- [x] Integrate ClinicalTrials.gov, EDGAR, and FRED for relevant questions with
       required credentials/contact configuration; document RePEc's search gap.
 - [x] Add approved OpenAlex/Crossref discovery routing, versioned full-text
       candidates, courtesy limits, caching, deadlines, cancellation, and visible
       partial failures; persist batches without counting metadata as full reads.
 - [ ] Extend routing/resolution and credentials contracts to additional providers
       and Python-composed acquisition/resolver operations.
-- [ ] Test work-type distinctions, missing credentials, false merges, retractions,
+- [x] Test work-type distinctions, missing credentials, false merges, retractions,
       incomplete results, and the rule that abstracts/snippets are not full reads.
 - [ ] Run explicitly approved adapter smoke tests and document actual coverage;
       preserve the configured web-provider/no-fallback behavior.
@@ -675,8 +675,9 @@ absent. Keep regression coverage for the working light pipeline throughout.
 **M1a–M1d are implemented and tested.** One existing checkout-local run was copied
 to central storage with its originals preserved. **M2's OpenAlex/Crossref batch**
 now uses normalized TypeScript discovery independently of the Python working-state
-adapter; public-network validation remains unperformed. Continue with CORE/DOAB,
-then specialist providers, keeping consent and capability failures explicit.
+adapter. CORE/DOAB and ClinicalTrials.gov/EDGAR/FRED now have opt-in, evidence-kind
+routing and offline fixtures; public-network validation remains unperformed.
+Continue with explicit resolver approval and M3 acquisition/context contracts.
 The important remaining work is better research and reports—not a new database or central vault manager. Finish with M6's pure
 TypeScript migration once the research contracts and parity evidence are in place;
 do not port out-of-scope knowledge-base features merely because upstream has them.

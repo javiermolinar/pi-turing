@@ -33,9 +33,9 @@ export function invertAbstract(raw: unknown): string | undefined {
 const types: Record<string, DiscoveryWork["workType"]> = {
   article: "article", "journal-article": "article", "proceedings-article": "article", review: "article", letter: "article", editorial: "article",
   book: "book", monograph: "book", "reference-book": "book", "edited-book": "book", "book-chapter": "book-chapter", "book-part": "book-chapter", "book-section": "book-chapter",
-  preprint: "preprint", "posted-content": "preprint", dissertation: "thesis", thesis: "thesis", report: "report", "report-component": "report", dataset: "dataset", erratum: "correction",
+  preprint: "preprint", "posted-content": "preprint", dissertation: "thesis", thesis: "thesis", report: "report", "report-component": "report", dataset: "dataset", erratum: "correction", trial: "trial", filing: "filing", series: "series", chapter: "book-chapter",
 };
-function date(raw: unknown, kind: "publication" | "registration" = "publication"): DiscoveryWork["date"] {
+function date(raw: unknown, kind: NonNullable<DiscoveryWork["date"]>["kind"] = "publication"): DiscoveryWork["date"] {
   const value = typeof raw === "number" ? String(raw) : text(raw, 10);
   if (!value || !/^\d{4}(?:-\d{2})?(?:-\d{2})?$/.test(value)) return;
   const [year, month, day] = value.split("-").map(Number);
@@ -118,7 +118,114 @@ function parse(items: unknown[], convert: typeof openalex, retrievedAt: string) 
   }
   return { results, skipped, truncated: items.length > 5 };
 }
+function core(raw: unknown, at: string, rank: number): DiscoveryWork | undefined {
+  const item = object(raw); const title = text(item.title); const id = Number.isSafeInteger(item.id) ? String(item.id) : text(item.id, 100);
+  if (!title || !id) return;
+  const result = base("core", id, title, text(item.documentType, 80)?.toLowerCase() ?? "unknown", `https://core.ac.uk/works/${encodeURIComponent(id)}`, normalizeDoi(item.doi), at, rank);
+  // Aggregated repository records do not establish a published version.
+  result.version = "unknown";
+  result.authors = [...new Set(array(item.authors).flatMap(author => text(object(author).name, 150) ?? text(author, 150) ?? []))].slice(0, 20);
+  result.date = date(item.publishedDate) ?? date(item.yearPublished);
+  result.abstract = abstract(text(item.abstract, 900));
+  if (Number.isSafeInteger(item.citationCount) && item.citationCount >= 0) result.citationCounts.push({ provider: "core", count: item.citationCount });
+  for (const rawUrl of [item.downloadUrl, ...array(item.sourceFulltextUrls).slice(0, 8)]) {
+    const url = scholarlyUrl(rawUrl); if (!url || result.urls.includes(url)) continue;
+    result.urls.push(url); result.fullTextCandidates.push({ url, version: "unknown", format: /\.pdf(?:[?#]|$)/i.test(url) ? "pdf" : "unknown", access: "unknown", provider: "core" });
+  }
+  return result;
+}
+function doab(raw: unknown, at: string, rank: number): DiscoveryWork | undefined {
+  const item = object(raw);
+  if ((item.type && item.type !== "item") || item.withdrawn === true || item.withdrawn === "true") return;
+  const entries = array(item.metadata).slice(0, 200).map(object);
+  const values = (key: string) => entries.filter(entry => entry.key === key).flatMap(entry => text(entry.value, 1500) ?? []);
+  const get = (key: string) => values(key)[0];
+  const title = text(get("dc.title") ?? item.name); const handle = text(item.handle, 200);
+  const doi = normalizeDoi(get("dc.identifier.doi")) ?? values("dc.identifier.uri").map(normalizeDoi).find(Boolean);
+  const url = scholarlyUrl(get("dc.identifier.uri")) ?? (handle ? `https://directory.doabooks.org/handle/${handle.split("/").map(encodeURIComponent).join("/")}` : undefined);
+  if (!title || !url || !(handle || doi)) return;
+  const result = base("doab", handle ?? doi!, title, text(get("dc.type"), 80)?.toLowerCase() ?? "book", url, doi, at, rank);
+  result.authors = values("dc.contributor.author").slice(0, 20).map(value => value.slice(0, 150));
+  const editors = values("dc.contributor.editor");
+  result.metadata = editors.length ? { editors: editors.join("; ").slice(0, 500) } : {};
+  const isbn = text(get("dc.identifier.isbn"), 100); if (isbn) result.metadata.isbn = isbn; // Not a merge key: editions/chapters share ISBNs.
+  result.date = date(get("dc.date.issued")); result.abstract = abstract(get("dc.description.abstract"));
+  const download = scholarlyUrl(get("oapen.identifier.downloadUrl"));
+  if (download) { result.urls.push(download); result.fullTextCandidates.push({ url: download, version: "unknown", format: /\.pdf(?:[?#]|$)/i.test(download) ? "pdf" : "unknown", access: "open", provider: "doab" }); }
+  return result;
+}
+function clinicaltrials(raw: unknown, at: string, rank: number): DiscoveryWork | undefined {
+  const section = object(object(raw).protocolSection); const idModule = object(section.identificationModule);
+  const id = text(idModule.nctId); const title = text(idModule.briefTitle) ?? text(idModule.officialTitle);
+  if (!id || !/^NCT\d{8}$/.test(id) || !title) return;
+  const result = base("clinicaltrials", id, title, "trial", `https://clinicaltrials.gov/study/${id}`, undefined, at, rank);
+  const status = object(section.statusModule); const design = object(section.designModule);
+  result.date = date(object(status.studyFirstSubmitDateStruct).date ?? status.studyFirstSubmitDate, "registration");
+  result.abstract = abstract(text(object(section.descriptionModule).briefSummary, 900));
+  result.metadata = {};
+  for (const [key, value] of Object.entries({ status: status.overallStatus, startDate: object(status.startDateStruct).date,
+    phases: array(design.phases).filter(value => typeof value === "string").join("/"),
+    sponsor: object(object(section.sponsorCollaboratorsModule).leadSponsor).name,
+    enrollment: Number.isSafeInteger(object(design.enrollmentInfo).count) ? String(object(design.enrollmentInfo).count) : undefined,
+    conditions: array(object(section.conditionsModule).conditions).filter(value => typeof value === "string").slice(0, 6).join("; ") })) {
+    const parsed = text(value); if (parsed) result.metadata[key] = parsed;
+  }
+  // A sponsor is not an author; registration is not a peer-reviewed outcome.
+  return result;
+}
+function edgar(raw: unknown, at: string, rank: number): DiscoveryWork | undefined {
+  const row = object(raw); const item = object(row._source);
+  const [prefix, document] = (text(row._id, 500) ?? "").split(":"); const accession = first(item.adsh) ?? prefix;
+  const cik = first(item.ciks);
+  if (!accession || !/^\d{10}-\d{2}-\d{6}$/.test(accession) || !cik || !/^\d{1,10}$/.test(cik)) return;
+  const file = document && /^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(document) && !document.includes("..") ? document : `${accession}-index.htm`;
+  const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accession.replace(/-/g, "")}/${file}`;
+  const company = first(item.display_names); const form = first(item.form) ?? first(item.root_forms); const filed = first(item.file_date);
+  const result = base("edgar", accession, [company, form, filed].filter(Boolean).join(" — ").slice(0, 500) || `SEC filing ${accession}`, "filing", url, undefined, at, rank);
+  result.date = date(filed, "filing"); result.metadata = { accession, cik };
+  for (const [key, value] of Object.entries({ company, form, periodEnding: first(item.period_ending) })) if (value) result.metadata[key] = value;
+  return result;
+}
+function fred(raw: unknown, at: string, rank: number): DiscoveryWork | undefined {
+  const item = object(raw); const id = text(item.id, 100); const title = text(item.title);
+  if (!id || !/^[a-zA-Z0-9_.-]+$/.test(id) || !title) return;
+  const result = base("fred", id, title, "series", `https://fred.stlouisfed.org/series/${id}`, undefined, at, rank);
+  result.date = date(item.observation_start, "observation"); result.abstract = abstract(text(item.notes, 900));
+  result.metadata = {};
+  for (const key of ["frequency", "units", "seasonal_adjustment", "observation_start", "observation_end", "last_updated"]) {
+    const value = text(item[key]); if (value) result.metadata[key] = value;
+  }
+  return result; // Metadata only: no observations, estimates, or conclusions fabricated.
+}
 export const scholarlyAdapters: Record<ScholarlyProvider, ScholarlyAdapter> = {
+  core: { id: "core", kinds: ["literature"], credential: "CORE_API_KEY", endpoint(query) {
+    const url = new URL("https://api.core.ac.uk/v3/search/works"); url.searchParams.set("q", query); url.searchParams.set("limit", "5"); return url;
+  }, headers(key) { return { Authorization: `Bearer ${key}` }; },
+  parse(payload, at) { return parse(z.object({ results: z.array(z.unknown()) }).parse(payload).results, core, at); } },
+  doab: { id: "doab", kinds: ["book"], endpoint(query) {
+    const url = new URL("https://directory.doabooks.org/rest/search"); url.searchParams.set("query", query); url.searchParams.set("expand", "metadata"); url.searchParams.set("limit", "5"); url.searchParams.set("offset", "0"); return url;
+  }, parse(payload, at) { return parse(z.array(z.unknown()).parse(payload), doab, at); } },
+  clinicaltrials: { id: "clinicaltrials", kinds: ["trial"], endpoint(query) {
+    const url = new URL("https://clinicaltrials.gov/api/v2/studies"); url.searchParams.set("query.term", query); url.searchParams.set("format", "json"); url.searchParams.set("pageSize", "5"); url.searchParams.set("countTotal", "false"); return url;
+  }, parse(payload, at) { return parse(z.object({ studies: z.array(z.unknown()) }).parse(payload).studies, clinicaltrials, at); } },
+  edgar: { id: "edgar", kinds: ["filing"], credential: "HYPERRESEARCH_CONTACT_EMAIL", endpoint(query) {
+    const url = new URL("https://efts.sec.gov/LATEST/search-index"); url.searchParams.set("q", query); return url;
+  }, headers(_key, contact) { return { "User-Agent": `pi-hyperresearch mailto:${contact}` }; },
+  parse(payload, at) {
+    const rows = z.object({ hits: z.object({ hits: z.array(z.unknown()) }) }).parse(payload).hits.hits;
+    // EFTS returns 100 documents, often exhibits of the same filing. Keep one
+    // highest-ranked document per accession, not five pseudo-independent filings.
+    const seen = new Set<string>(); const results: DiscoveryWork[] = []; let skipped = 0;
+    for (const [index, row] of rows.slice(0, 100).entries()) {
+      const result = edgar(row, at, index + 1); if (!result) { skipped++; continue; }
+      if (seen.has(result.id)) continue; seen.add(result.id);
+      if (results.length < 5) results.push(discoveryWorkSchema.parse(result));
+    }
+    return { results, skipped, truncated: rows.length > 100 || seen.size > 5 };
+  } },
+  fred: { id: "fred", kinds: ["series"], credential: "FRED_API_KEY", endpoint(query, _contact, key) {
+    const url = new URL("https://api.stlouisfed.org/fred/series/search"); url.searchParams.set("search_text", query); url.searchParams.set("api_key", key ?? ""); url.searchParams.set("file_type", "json"); url.searchParams.set("limit", "5"); return url;
+  }, parse(payload, at) { return parse(z.object({ seriess: z.array(z.unknown()) }).parse(payload).seriess, fred, at); } },
   openalex: { id: "openalex", endpoint(query, contact) {
     const url = new URL("https://api.openalex.org/works"); url.searchParams.set("search", query); url.searchParams.set("per-page", "5");
     if (contact) url.searchParams.set("mailto", contact); return url;

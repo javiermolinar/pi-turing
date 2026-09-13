@@ -85,7 +85,8 @@ test("service uses approved fixed endpoints only, caches privately and distingui
   const malformed = new ScholarlyDiscovery({ env: {}, fetchImpl: async () => Response.json({ error: "secret" }) });
   assert.equal((await malformed.search("bad", ["openalex"])).coverage[0].status, "failed");
   await assert.rejects(service.search("no providers", []), /approved/);
-  assert.throws(() => configSchema.parse({ scholarlyProviders: ["core"] })); // Not enabled in this slice.
+  assert.deepEqual(configSchema.parse({ scholarlyProviders: ["core"] }).scholarlyProviders, ["core"]);
+  assert.throws(() => configSchema.parse({ scholarlyProviders: ["repec"] }));
 });
 
 test("deadlines, courtesy pacing, body limits, cancellation and output caps are enforced", async () => {

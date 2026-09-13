@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { abortable, boundedBody } from "./http.ts";
-import { discoveryBatchSchema, scholarlyProviderSchema, type DiscoveryBatch, type DiscoveryWork, type ScholarlyProvider } from "./discovery-types.ts";
+import { discoveryBatchSchema, discoveryKindSchema, scholarlyProviderSchema, type DiscoveryKind, type DiscoveryBatch, type DiscoveryWork, type ScholarlyProvider } from "./discovery-types.ts";
 import { scholarlyAdapters } from "./scholarly-providers.ts";
 
 export function consolidateWorks(input: DiscoveryWork[]): Pick<DiscoveryBatch, "results" | "uncertainMatches"> {
@@ -31,7 +32,7 @@ export function consolidateWorks(input: DiscoveryWork[]): Pick<DiscoveryBatch, "
   return { results, uncertainMatches: uncertainMatches.slice(0, 100) };
 }
 interface Options {
-  fetchImpl?: typeof fetch; env?: { HYPERRESEARCH_CONTACT_EMAIL?: string };
+  fetchImpl?: typeof fetch; env?: { HYPERRESEARCH_CONTACT_EMAIL?: string; CORE_API_KEY?: string; FRED_API_KEY?: string };
   timeoutMs?: number; minIntervalMs?: number;
 }
 type ProviderResult = { results: DiscoveryWork[]; skipped: number; truncated: boolean };
@@ -41,17 +42,28 @@ export class ScholarlyDiscovery {
   private queues = new Map<ScholarlyProvider, Promise<unknown>>();
   private nextRequest = new Map<ScholarlyProvider, number>();
   constructor(private options: Options = {}) {}
-  async search(query: string, enabled: readonly ScholarlyProvider[] = ["openalex", "crossref"], signal?: AbortSignal): Promise<DiscoveryBatch> {
+  async search(query: string, enabled: readonly ScholarlyProvider[] = ["openalex", "crossref"], signal?: AbortSignal, kind: DiscoveryKind = "literature"): Promise<DiscoveryBatch> {
     z.string().trim().min(1).max(500).parse(query);
-    const providers = [...new Set(z.array(scholarlyProviderSchema).max(2).parse(enabled))];
+    const providers = [...new Set(z.array(scholarlyProviderSchema).max(7).parse(enabled))];
+    discoveryKindSchema.parse(kind);
     if (!providers.length) throw new Error("No scholarly providers approved");
-    const contact = (this.options.env ?? process.env).HYPERRESEARCH_CONTACT_EMAIL;
+    const env = this.options.env ?? process.env;
+    const contact = env.HYPERRESEARCH_CONTACT_EMAIL;
     if (contact) z.email().parse(contact);
     signal?.throwIfAborted();
     const coverage: DiscoveryBatch["coverage"] = [];
     const values = await Promise.all(providers.map(async provider => {
       const deadline = AbortSignal.any([AbortSignal.timeout(Math.max(1, Math.min(30_000, this.options.timeoutMs ?? 10_000))), ...(signal ? [signal] : [])]);
-      const key = JSON.stringify([provider, query, contact ?? ""]);
+      const adapter = scholarlyAdapters[provider];
+      if (!(adapter.kinds ?? ["literature", "book"]).includes(kind)) {
+        coverage.push({ provider, status: "not-selected", count: 0, skipped: 0, cached: false, error: `Not routed for ${kind} evidence` }); return [];
+      }
+      const credential = adapter.credential ? env[adapter.credential] : undefined;
+      if (adapter.credential && (!credential?.trim() || /[\x00-\x20\x7f]/.test(credential))) {
+        coverage.push({ provider, status: "unavailable", count: 0, skipped: 0, cached: false, error: `Requires ${adapter.credential}` }); return [];
+      }
+      // Revalidate credentials before cache hits; never retain secret-bearing URLs.
+      const key = JSON.stringify([provider, query, contact ?? "", createHash("sha256").update(credential ?? "").digest("hex")]);
       try {
         const cached = this.cache.get(key);
         if (cached && Date.now() - cached.at < 300_000) {
@@ -64,9 +76,8 @@ export class ScholarlyDiscovery {
           if (wait) await delay(wait, undefined, { signal: deadline });
           deadline.throwIfAborted();
           this.nextRequest.set(provider, Date.now() + Math.max(0, this.options.minIntervalMs ?? 500));
-          const adapter = scholarlyAdapters[provider];
-          const fetching = (this.options.fetchImpl ?? fetch)(adapter.endpoint(query, contact), {
-            signal: deadline, redirect: "error", credentials: "omit", headers: { Accept: "application/json" },
+          const fetching = (this.options.fetchImpl ?? fetch)(adapter.endpoint(query, contact, credential), {
+            signal: deadline, redirect: "error", credentials: "omit", headers: { Accept: "application/json", ...adapter.headers?.(credential, contact) },
           });
           void fetching.then(response => { if (deadline.aborted) void response.body?.cancel().catch(() => {}); }, () => {});
           const response = await abortable(fetching, deadline);
@@ -107,7 +118,7 @@ export class ScholarlyDiscovery {
       limitation: "Discovery metadata and abstracts are untrusted leads, not full-read evidence or independent corroboration." });
     while (Buffer.byteLength(JSON.stringify(batch)) > 45_000 && (batch.results.length || batch.uncertainMatches.length)) {
       if (batch.uncertainMatches.length) batch.uncertainMatches.pop(); else batch.results.pop();
-      for (const provider of batch.coverage) if (provider.status !== "failed") { provider.status = "partial"; provider.error = "Output budget reached; some records or match diagnostics omitted"; }
+      for (const provider of batch.coverage) if (["ok", "partial"].includes(provider.status)) { provider.status = "partial"; provider.error = "Output budget reached; some records or match diagnostics omitted"; }
     }
     return batch;
   }

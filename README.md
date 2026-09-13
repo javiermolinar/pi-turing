@@ -82,7 +82,7 @@ A live smoke check returned a CAPTCHA; the adapter refuses to bypass it.
 
 **There is no automatic provider fallback.** Parallel and Serply are disabled,
 and web searches no longer pass through Hyperresearch's search providers.
-OpenAlex and Crossref still provide scholarly discovery through the backend.
+Scholarly discovery uses composable TypeScript adapters, independently of the backend.
 Search queries leave your machine for the selected service; source bodies and
 your research query are sent to the selected models.
 
@@ -204,10 +204,16 @@ checkout-local artifacts require explicit migration before central resume.
 
 ## Scholarly discovery
 
-One `scholar_search` capability now composes TypeScript OpenAlex/Crossref adapters,
-independently of Python or its storage. New-run configuration can select either or
-both with `"scholarlyProviders": ["openalex", "crossref"]`; an empty list disables
-scholarly discovery. Unsupported providers are rejected, not substituted. Optional
+One `scholar_search` capability composes TypeScript OpenAlex, Crossref, CORE, DOAB,
+ClinicalTrials.gov, SEC EDGAR and FRED adapters independently of Python or storage.
+`scholarlyProviders` defaults to `["openalex", "crossref"]`; additional providers
+require explicit configuration and start/resume approval. An empty list disables
+discovery. Workers select an evidence kind (`literature`, `book`, `trial`, `filing`,
+`series`) within that allowlist. Unselected and unavailable services stay visible.
+CORE requires `CORE_API_KEY`; FRED requires `FRED_API_KEY`; EDGAR requires
+`HYPERRESEARCH_CONTACT_EMAIL` in its identifying User-Agent. Credentials are never
+persisted in results or logs; FRED's required query key is used only in the request.
+RePEc has no usable upstream search API here and is not an enabled adapter. Optional
 `HYPERRESEARCH_CONTACT_EMAIL` supplies the providers' courtesy contact parameter.
 This controls discovery only; the temporary Python full-text resolver and metadata
 refresh still need their own approval/routing work in later milestones.
@@ -224,8 +230,8 @@ Requests use fixed endpoints, no redirects/cookies, a ten-second provider deadli
 2 MB response cap, five records/provider, per-provider serialization/courtesy delay,
 a private five-minute cache and bounded output. Rate limits do not trigger another
 provider. Offline fixtures pass; public-network adapter smoke tests and comparative
-research evaluation have not been performed. CORE/DOAB and specialist providers
-remain the next batches, not enabled capabilities.
+research evaluation have not been performed. New provider defaults have not been
+enabled, and no live provider requests were made during this implementation.
 
 ## Run picker
 

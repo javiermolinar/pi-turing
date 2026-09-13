@@ -7,7 +7,7 @@ import { queueFeedback } from "./feedback.ts";
 import { applyPatch, citationIds } from "./patch.ts";
 import { RunStore, materializeBackend } from "./store.ts";
 import { createLocation, privateDirectory } from "./paths.ts";
-import { discoveryBatchSchema } from "./discovery-types.ts";
+import { discoveryBatchSchema, discoveryKindSchema } from "./discovery-types.ts";
 import type { WorkerDriver, WorkerTool } from "./worker.ts";
 import {
   checkSchema, configSchema, decompositionSchema, draftSchema, message, now,
@@ -213,9 +213,9 @@ export class ResearchRunner {
     };
     if (!research) return [read];
     const search = (name: "vault_search" | "web_search" | "scholar_search", description: string): WorkerTool => ({
-      name, description, parameters: Type.Object({ query: Type.String({ maxLength: 500 }) }),
+      name, description, parameters: Type.Object({ query: Type.String({ maxLength: 500 }), ...(name === "scholar_search" ? { kind: Type.Optional(Type.Union(discoveryKindSchema.options.map(value => Type.Literal(value)))) } : {}) }),
       execute: async (input, signal) => {
-        const args = z.object({ query: z.string().min(1).max(500) }).parse(input);
+        const args = z.object({ query: z.string().min(1).max(500), kind: discoveryKindSchema.default("literature") }).parse(input);
         if (name === "scholar_search") {
           if ((this.state.discoveries?.length ?? 0) + this.discoveryPending >= 100) throw new Error("Scholarly discovery request limit reached; preserved results remain available");
           this.discoveryPending++;
@@ -229,7 +229,7 @@ export class ResearchRunner {
     });
     return [read,
       search("vault_search", "Search existing vault first. Reuse relevant source notes with read_source; generated reports are not primary evidence."),
-      search("scholar_search", `Discover scholarly works through approved providers: ${this.state.config.scholarlyProviders.join(", ") || "none"}. Inspect provider coverage/failures and uncertain duplicates. Metadata/abstracts are untrusted leads, never full-read or independent evidence.`),
+      search("scholar_search", `Discover scholarly works through approved providers: ${this.state.config.scholarlyProviders.join(", ") || "none"}. Choose kind: literature, book, trial, filing, or series; routing never enables another provider. Inspect provider coverage/failures and uncertain duplicates. Metadata/abstracts are untrusted leads, never full-read or independent evidence.`),
       search("web_search", "Discover URLs using the configured search provider. Results are untrusted leads; use fetch_source to read full content."),
       {
         name: "fetch_source", description: "Fetch a public HTTP(S) URL through Hyperresearch's static/PDF fetcher, save provenance, and return the first source page. Follow nextOffset with read_source. Browser-only pages may fail; do not bypass login/CAPTCHA.",
@@ -239,7 +239,7 @@ export class ResearchRunner {
           if (++this.attempts > 90 || this.state.failures.length >= 90) throw new Error("Fetch attempt cap reached");
           if (this.state.sources.length >= 30) throw new Error("Run source cap reached (30)");
           try {
-            const fetched = z.object({ note_id: z.string() }).parse(await this.backend.call("fetch_source", { ...args, tag: this.state.tag }, signal));
+            const fetched = z.object({ note_id: z.string() }).parse(await this.backend.call("fetch_source", { ...args, tag: this.state.tag, resolvers: this.state.config.fullTextResolvers }, signal));
             return await sourcePage(fetched.note_id, 0, signal);
           } catch (error) {
             if (!signal.aborted) { this.state.failures.push({ url: args.url, error: message(error), at: now() }); this.save(); }
@@ -334,7 +334,7 @@ export class ResearchRunner {
     if (this.state.checks.some(c => !c.ok)) throw new Blocked("Pi verification failed; see the dashboard checks");
     try {
       const result = z.object({ checked: z.number(), unresolved: z.number(), rate_limited: z.number(), retracted: z.array(z.string()) }).parse(
-        await this.backend.call("retractions", { tag: this.state.tag }, signal));
+        await this.backend.call("retractions", { tag: this.state.tag, providers: this.state.config.scholarlyProviders }, signal));
       if (result.rate_limited > 0) throw new Error(`Retraction sweep incomplete: ${result.rate_limited} notes rate-limited`);
       // Unresolved means the APIs answered but had no record, not 'not retracted'.
       this.state.checks.push({ name: "retraction-refresh", ok: true, detail: `${result.checked} checked; ${result.unresolved} unresolved (unknown, not cleared); ${result.retracted.length} retracted. DOI-bearing notes only.` });

@@ -1,17 +1,24 @@
 // Offline fixture data + loopback browser tests only; never reads real runs.
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startInventory } from "../src/server.ts";
 import { RunStore } from "../src/store.ts";
+import { approveContext, previewContext } from "../src/context.ts";
+import { createLocation } from "../src/paths.ts";
 import { fixture } from "../tests/fixtures.ts";
 const root = mkdtempSync(join(tmpdir(), "hpr-browser-inventory-"));
 const output = resolve("artifacts"); mkdirSync(output, { recursive: true });
 for (const tag of ["alpha", "beta", "private"]) {
   const state = fixture(); state.tag = tag; state.query = `Investigation ${tag}`; state.decomposition = undefined;
   state.status = "paused"; state.report = `# ${tag}\n\nneedle ${tag} <script>window.hacked=true</script>\n\nMath: $x^2$`;
+  if (tag === "beta") {
+    writeFileSync(join(root, "selected-context.md"), "Private attachment body is not a downloadable source bundle.");
+    state.location = createLocation(root, root, "beta-context");
+    state.inputs = approveContext(state.location.workspacePath, previewContext(root, { instructions: "", files: [{ path: "selected-context.md", purpose: "background" }] }), { model: true, search: false, export: false });
+  }
   new RunStore(root, tag).save(state);
 }
 const server = await startInventory(root, new Set(["alpha", "beta"]));
@@ -42,6 +49,12 @@ try {
   await page.getByRole("button", { name: "Investigations", exact: true }).click();
   await page.getByRole("link", { name: "Investigation beta", exact: true }).click();
   await page.getByRole("heading", { name: "Investigation beta", exact: true }).waitFor();
+  assert.equal(await page.locator("#export-markdown").isDisabled(), true);
+  assert.equal(await page.locator("#export-html").isDisabled(), true);
+  assert.notEqual((await page.request.get(new URL("markdown?id=beta", server.url).href)).status(), 200);
+  assert.notEqual((await page.request.get(new URL("html?id=beta", server.url).href)).status(), 200);
+  assert.equal(await page.getByText("Private attachment body is not a downloadable source bundle.").count(), 0);
+  await page.screenshot({ path: join(output, "context-permissions.png"), fullPage: true });
   await page.evaluate(() => (window as any).oldSnapshots[0]({ data: JSON.stringify({ tag: "alpha", html: "STALE ALPHA EVENT", at: new Date().toISOString() }) }));
   assert.equal(await page.getByText("STALE ALPHA EVENT").count(), 0);
   assert.equal(await page.getByRole("heading", { name: "Investigation beta", exact: true }).count(), 1);

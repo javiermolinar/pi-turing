@@ -124,6 +124,7 @@ export function renderReport(markdown: string, sources: Source[]): string {
         renderer(token) {
           const source = sourceMap.get(token.id);
           const href = source && externalUrl(source.url);
+          if (source?.origin === "local") return `<span class="citation-local" title="Local evidence, not independent external corroboration; inspect the approved snapshot in Pi">${escapeHtml(token.label ?? `[Local ${source.number}]`)}</span>`;
           if (!source || !href) return `<span class="citation-missing" title="No usable URL for this citation">${escapeHtml(token.raw)}</span>`;
           const url = new URL(href);
           if (token.fragment) url.hash = token.fragment;
@@ -148,7 +149,7 @@ export function renderReport(markdown: string, sources: Source[]): string {
       a: ["href", "target", "rel", "title", "class"], span: ["class", "title", "data-report-fragment"],
       h1: ["id"], h2: ["id"], h3: ["id"], h4: ["id"], h5: ["id"], h6: ["id"],
     },
-    allowedClasses: { a: ["citation"], span: ["citation-missing", "unresolved-link"] },
+    allowedClasses: { a: ["citation"], span: ["citation-missing", "citation-local", "unresolved-link"] },
     allowedSchemes: ["http", "https"], allowProtocolRelative: false,
     transformTags: {
       a: (_tag, attrs): sanitizeHtml.Tag => {

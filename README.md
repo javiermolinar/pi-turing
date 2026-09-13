@@ -207,6 +207,40 @@ accepted for execution. Old checkpoints remain readable for status and dashboard
 views. Legacy providers cannot execute and are never replaced silently. Existing
 checkout-local artifacts require explicit migration before central resume.
 
+## Local context and additional instructions
+
+New research offers **Additional sources & instructions** and optional file
+selection. Advanced defaults are `additionalInstructions` and `contextFiles`
+(`[{"path":"design.md","purpose":"evidence"}]`) in project configuration.
+These preferences are proposals, not permissions. Context requires interactive
+approval; non-interactive launches with context fail before model work.
+
+- Files must be inside the originating project. Supported: Markdown, UTF-8 text,
+  reStructuredText, JSON and CSV; eight files, 200KB each, 500KB total. Protected
+  paths, symlinks, binary data and likely credentials are refused. Secret detection
+  is heuristic: review selected files yourself before approving disclosure.
+- Preview includes purpose, exact path, byte size and hash. Changed selections need
+  a fresh approval. Snapshots and grants are private, outside the project.
+- Background context cannot be cited or satisfy source-count gates. Local evidence
+  has its own snapshot/hash and local citation label; it is never independent
+  external corroboration. Source attachments are not bundled in exports.
+- Model use, public search/acquisition disclosure, and derived-report export are
+  separate approvals. Without search permission, public research runs first without
+  private inputs; after private context is used, further public requests are
+  blocked, including requests through previously created tools.
+- Without export permission, Markdown/HTML downloads and Pi saves are blocked;
+  human read-only viewing remains available. Review derived text before sharing.
+- `/hyperresearch context [tag]` adds approved context to a paused run and queues
+  replanning without starting workers. If context is already attached, it offers
+  revocation. Revocation preserves snapshots but blocks further model use/exports.
+- Resume validates the saved grant and snapshot, never the current project's files.
+  Revisions require explicit reapproval to reuse pinned snapshots and the previous
+  report. Refreshing changed files requires a new run and fresh preview. A revoked
+  grant is not silently restored; start a new run to approve a new context selection.
+
+Freeform instructions do not grant new skills, integrations, shell access, or file
+permissions. Scoped integration adapters are the next implementation slice.
+
 ## Scholarly discovery
 
 One `scholar_search` capability composes TypeScript OpenAlex, Crossref, CORE, DOAB,

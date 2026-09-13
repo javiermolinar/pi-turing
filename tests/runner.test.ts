@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Backend, BackendAction } from "../src/backend.ts";
 import { ResearchRunner } from "../src/runner.ts";
+import { approveContext, previewContext, revokeContext } from "../src/context.ts";
 import { createLocation } from "../src/paths.ts";
 import { ResearchServices } from "../src/services.ts";
 import { ScholarlyDiscovery } from "../src/scholarly.ts";
@@ -79,6 +80,37 @@ test("scholarly batches and coverage persist without counting discovery metadata
     assert.equal(state.sources.length, 2); assert.ok(state.sources.every(source => source.id.startsWith("source-")));
     assert.ok(!env.backend.calls.includes("scholar_search"));
   } finally { env.cleanup(); }
+});
+
+test("local context stays out of public planning, distinguishes background from evidence, and enforces disclosure on stale tools", async () => {
+  for (const purpose of ["background", "evidence"] as const) {
+    const env = await setup();
+    try {
+      writeFileSync(join(env.cwd, "private.md"), "Confidential design details for the approved model. ".repeat(200));
+      const inputs = approveContext(env.runner.state.location!.workspacePath, previewContext(env.cwd, { instructions: "Use our private deployment design", files: [{ path: "private.md", purpose }] }), { model: true, search: false, export: false });
+      env.runner.state.inputs = inputs; env.runner.state.location!.contextRefs = inputs.files.map(file => file.id); env.runner.state.location!.approvalRefs = [inputs.grant.id];
+      const work = env.driver.run.bind(env.driver); let oldSearch: WorkRequest["tools"][number] | undefined;
+      env.driver.run = async (request, state) => {
+        if (["decompose", "research"].includes(request.role)) assert.ok(!request.prompt.includes("Use our private deployment design"));
+        if (request.role === "research") oldSearch = request.tools.find(tool => tool.name === "web_search");
+        if (request.role === "draft") {
+          assert.match(request.prompt, /Use our private deployment design/);
+          const read = request.tools.find(tool => tool.name === "read_source")!; let offset: number | null = 0;
+          while (offset !== null) offset = (await read.execute({ id: inputs.files[0].id, offset }, request.signal) as any).nextOffset;
+          await assert.rejects(oldSearch!.execute({ query: "private details must not leave" }, request.signal), /disclosure approval/);
+        }
+        return work(request, state);
+      };
+      await env.runner.run(); assert.equal(env.runner.state.status, "done", env.runner.state.reason);
+      assert.equal(env.runner.state.sources.some(source => source.origin === "local"), purpose === "evidence");
+      assert.equal(env.runner.state.disclosure?.searchBlocked, true); assert.equal(env.runner.state.disclosure?.exportBlocked, true);
+      assert.ok(!readFileSync(join(env.runner.store.dir, "pi-state.json"), "utf8").includes("Confidential design details"));
+      revokeContext(env.runner.state.location!.workspacePath, inputs); env.runner.state.status = "paused";
+      let modelChecks = 0; env.driver.checkModels = async () => { modelChecks++; return true; };
+      const resumed = new ResearchRunner(env.cwd, env.runner.state, env.backend, env.driver); await resumed.run();
+      assert.equal(modelChecks, 0); assert.match(resumed.state.reason!, /revoked/);
+    } finally { env.cleanup(); }
+  }
 });
 
 test("incomplete extraction cannot satisfy the width gate, even with complete pagination", async () => {

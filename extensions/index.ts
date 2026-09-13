@@ -3,6 +3,8 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { approveContext, previewContext, reapproveContext, revokeContext, validateContext, type ContextPreview } from "../src/context.ts";
+import type { ContextRequest, Disclosure } from "../src/context-types.ts";
 import { PythonBackend, setupBackend } from "../src/backend.ts";
 import { ResearchServices } from "../src/services.ts";
 import { execute } from "../src/process.ts";
@@ -27,6 +29,7 @@ const help = `Hyperresearch — light pipeline (experimental)
 /hyperresearch start <question>  Start research using the selected Pi model
 /hyperresearch status [tag]      Show persisted progress
 /hyperresearch steer <feedback>  Queue feedback; replan at next stage boundary
+/hyperresearch context [tag]     Approve local context for a paused run (or revoke)
 /hyperresearch revise <tag> <feedback>  New revision of a completed report
 /hyperresearch pause             Interrupt safely; keep artifacts
 /hyperresearch resume [tag]      Resume with saved context/configuration
@@ -112,6 +115,26 @@ export default function hyperresearch(pi: ExtensionAPI) {
     saveMarkdown(target, markdown, approved);
     say(ctx, `Report saved: ${target.path}. This is a copy; verification status is included.`);
   };
+  async function contextRequest(ctx: ExtensionContext, project: string, initial: ContextRequest): Promise<ContextRequest | undefined> {
+    if (!ctx.hasUI) return initial;
+    const instructions = await ctx.ui.input("Additional sources & instructions (optional; no tools are granted by this text)", initial.instructions);
+    if (instructions === undefined) return;
+    const files = [...initial.files];
+    while (files.length < 8 && await ctx.ui.confirm(files.length ? "Add another local context file?" : "Attach a local context file?", `Optional. Originating project: ${project}\nExisting selections: ${files.map(file => `${file.path} (${file.purpose})`).join(", ") || "none"}\nOnly selected text files are snapshotted; no directory scans or ambient project instructions.`)) {
+      const path = await ctx.ui.input(`File path within ${project}`); if (!path) return;
+      const purpose = await ctx.ui.select("How should this file be used?", ["Background (not citable)", "Local evidence (not independent external corroboration)"]);
+      if (!purpose) return;
+      files.push({ path, purpose: purpose.startsWith("Background") ? "background" : "evidence" });
+    }
+    return { instructions, files };
+  }
+  async function contextPermissions(ctx: ExtensionContext, summary: string): Promise<Disclosure | undefined> {
+    if (!ctx.hasUI) throw new Error("Local context and additional instructions require interactive disclosure approval before model work");
+    if (!await ctx.ui.confirm("Approve context for research models?", `${summary}\nThe selected research models will receive this context. Text is untrusted data; instructions cannot grant tools. Nothing is sent if you decline.`)) return;
+    const search = await ctx.ui.confirm("Allow context in public search/acquisition requests?", "Separate permission. If declined, private context is reserved for drafting; later public requests are disabled after it is used. Public research still runs first without these inputs.");
+    const exportAllowed = await ctx.ui.confirm("Allow exporting reports derived from this context?", "Separate permission. This allows derived report copies, not source attachments. If declined, read-only viewing remains available but Markdown/HTML export and Save report are blocked after context use.");
+    return { model: true, search, export: exportAllowed };
+  }
   function launch(ctx: ExtensionContext, query?: string, resumeTag?: string, revision?: { tag: string; feedback: string }, useProjectConfig = false): Promise<void> {
     if (active || launching) return Promise.reject(new Error("A run is already active. Pause or cancel it first."));
     startup = launchInner(ctx, query, resumeTag, revision, useProjectConfig);
@@ -128,8 +151,22 @@ export default function hyperresearch(pi: ExtensionAPI) {
       if (!revision && selected && ["done", "aborted"].includes(selected.status)) throw new Error(`Cannot resume a ${selected.status} run`);
       const location = selected ? requireLocation(selected, root) : createLocation(ctx.cwd, root);
       const config = selected && !useProjectConfig ? configSchema.parse(selected.config) : loadConfig(ctx.cwd);
+      if (selected?.inputs) validateContext(location.workspacePath, selected.inputs);
+      let preview: ContextPreview | undefined; let permissions: Disclosure | undefined;
+      if (!selected) {
+        const requested = await contextRequest(ctx, location.projectPath, { instructions: config.additionalInstructions, files: config.contextFiles });
+        if (!requested) return;
+        config.additionalInstructions = requested.instructions; config.contextFiles = requested.files;
+        if (requested.instructions || requested.files.length) {
+          preview = previewContext(location.projectPath, requested);
+          permissions = await contextPermissions(ctx, JSON.stringify(preview, null, 2)); if (!permissions) return;
+        }
+      } else if (revision && selected.inputs) {
+        permissions = await contextPermissions(ctx, `Revision reuses these pinned snapshots and the previous report, not current project files:\n${JSON.stringify(selected.inputs, null, 2)}`);
+        if (!permissions) return;
+      }
       if (ctx.hasUI && !await ctx.ui.confirm(selected ? (revision ? "Create revision?" : "Resume paid research?") : "Start research?",
-        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nScholarly: ${config.scholarlyProviders.join(", ") || "disabled"}\nFull-text resolvers: ${config.fullTextResolvers.join(", ") || "disabled"} (Unpaywall needs HYPERRESEARCH_CONTACT_EMAIL; CORE needs CORE_API_KEY)\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.") : "No local files or integrations attached."}`)) return;
+        `Project: ${location.projectPath}\nWorkspace: ${location.workspacePath}\nModel: ${selected?.model ?? (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "not selected")}\nSearch: ${config.searchProvider}\nScholarly: ${config.scholarlyProviders.join(", ") || "disabled"}\nFull-text resolvers: ${config.fullTextResolvers.join(", ") || "disabled"} (Unpaywall needs HYPERRESEARCH_CONTACT_EMAIL; CORE needs CORE_API_KEY)\nModel ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).\n${selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.") : preview ? "Only the separately approved context will be attached; no ambient integrations are loaded." : "No local files or integrations attached."}${selected?.inputs ? `\nSaved context grant: ${selected.inputs.grant.id}; model/search/export permissions remain scoped to this run.` : ""}`)) return;
       const lost = (error: Error) => { lifecycle.abort(); active?.stop("paused"); say(ctx, `Runner lock lost: ${message(error)}`); };
       const unlockRoot = await lockDataRoot(root, lost);
       release = unlockRoot;
@@ -141,6 +178,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
         if (JSON.stringify(current) !== JSON.stringify(selected)) throw new Error("Run changed while awaiting approval. Select it again.");
       }
       ensureSearchConfigured(config.searchProvider);
+      const inputs = preview ? approveContext(location.workspacePath, preview, permissions!) : revision && selected?.inputs ? reapproveContext(location.workspacePath, selected.inputs, permissions!) : selected?.inputs;
       const backend = new ResearchServices(new PythonBackend(location.workspacePath));
       const driver = await PiWorkerDriver.create(ctx, location.workspacePath);
       lifecycle.signal.throwIfAborted();
@@ -148,9 +186,9 @@ export default function hyperresearch(pi: ExtensionAPI) {
         if (!selected && !ctx.model) throw new Error("Select an authenticated model first");
         active = revision
           ? await ResearchRunner.revise(location.projectPath, selected!, revision.feedback, config,
-            selected!.model, selected!.thinking, backend, driver, state => show(state, ctx))
+            selected!.model, selected!.thinking, backend, driver, state => show(state, ctx), inputs)
           : await ResearchRunner.create(location.projectPath, query!, config, `${ctx.model!.provider}/${ctx.model!.id}`, ctx.thinkingLevel ?? "medium",
-            backend, driver, state => show(state, ctx), undefined, location);
+            backend, driver, state => show(state, ctx), undefined, location, inputs);
       } else {
         const state = new RunStore(root, selected!.tag).load();
         state.config = config; // Only an explicit --use-project-config proposes replacements.
@@ -176,7 +214,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
 
   pi.registerCommand("hyperresearch", {
     description: "Research with a persistent vault and live/offline HTML dashboard",
-    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup", "migrate", "list", "export", "save", "help"]
+    getArgumentCompletions: prefix => ["start", "status", "steer", "revise", "pause", "resume", "cancel", "dashboard", "snapshot", "setup", "migrate", "list", "export", "save", "context", "help"]
       .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
     handler: async function handleCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
       try {
@@ -254,6 +292,38 @@ export default function hyperresearch(pi: ExtensionAPI) {
           try { await setupBackend(ctx.cwd, lifecycle.signal); }
           finally { launching = false; }
           say(ctx, "Backend installed. Start with /hyperresearch <question>."); return;
+        }
+        if (command === "context") {
+          trusted(ctx);
+          if (active || launching) throw new Error("Pause research before changing context approvals");
+          const selected = new RunStore(dataRoot(), resolveState(ctx, argument || undefined).tag).load(); const location = requireLocation(selected, dataRoot());
+          if (!ctx.hasUI) throw new Error("Context changes require interactive approval");
+          if (selected.inputs) {
+            if (await ctx.ui.confirm("Revoke this run's context approval?", "Saved snapshots remain, but further model use and exports are refused. To reuse current snapshots, revise with explicit reapproval before revoking. Changed files require a new run and fresh preview.")) {
+              const unlock = await lockDataRoot(dataRoot());
+              try {
+                const current = new RunStore(dataRoot(), selected.tag).load();
+                if (JSON.stringify(current) !== JSON.stringify(selected)) throw new Error("Run changed while awaiting revocation approval");
+                revokeContext(location.workspacePath, selected.inputs); say(ctx, "Context approval revoked; snapshots preserved.");
+              } finally { await unlock(); }
+            }
+            return;
+          }
+          if (!["paused", "failed", "blocked"].includes(selected.status)) throw new Error("Attach context to a paused run, or create an explicitly approved revision");
+          const request = await contextRequest(ctx, location.projectPath, { instructions: "", files: [] }); if (!request || (!request.instructions && !request.files.length)) return;
+          const preview = previewContext(location.projectPath, request);
+          say(ctx, "Context proposal pending approval; no steering or model work has started.");
+          const permissions = await contextPermissions(ctx, JSON.stringify(preview, null, 2)); if (!permissions) return;
+          const unlock = await lockDataRoot(dataRoot());
+          try {
+            const store = new RunStore(dataRoot(), selected.tag); const state = store.load();
+            if (JSON.stringify(state) !== JSON.stringify(selected)) throw new Error("Run changed while awaiting context approval");
+            const inputs = approveContext(location.workspacePath, preview, permissions);
+            state.inputs = inputs; state.location!.contextRefs = inputs.files.map(file => file.id); state.location!.approvalRefs = [inputs.grant.id];
+            queueFeedback(state, "Use the newly approved additional sources and instructions within their disclosure permissions.");
+            store.save(state); show(state, ctx); say(ctx, "Context approved and steering queued. Resume explicitly to apply it at the next stage boundary.");
+          } finally { await unlock(); }
+          return;
         }
         if (command === "steer") {
           trusted(ctx);

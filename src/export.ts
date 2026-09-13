@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { type RunState } from "./types.ts";
+import { validateContextApproval } from "./context.ts";
 import { mathAt } from "./report.ts";
 
 const mdText = (text: string) => text.replace(/[\x00-\x1f\x7f]/g, " ").replace(/[\\`*_[\]<>]/g, "\\$&");
@@ -15,8 +16,19 @@ export function publicUrl(raw: string): string | undefined {
     return url.href.replace(/[<>\\]/g, char => encodeURIComponent(char));
   } catch { return; }
 }
+export function assertExportAllowed(state: RunState): void {
+  if (state.inputs) {
+    if (!state.location) throw new Error("Missing approved context workspace");
+    validateContextApproval(state.location.workspacePath, state.inputs);
+  }
+  if (state.disclosure?.exportBlocked || (state.inputs && !state.inputs.grant.disclosure.export)) throw new Error("Export not approved for the private context used in this report. Review/reapprove that context in a new revision before exporting.");
+}
+export function exportAllowed(state: RunState): boolean {
+  try { assertExportAllowed(state); return true; } catch { return false; }
+}
 /** Standard Markdown links, no wiki dependency, no source file reads or attachments. */
 export function portableMarkdown(state: RunState): string {
+  assertExportAllowed(state);
   if (state.report === undefined) throw new Error("No report has been drafted yet");
   const sources = new Map(state.sources.map((source, index) => [source.id, { ...source, number: index + 1 }]));
   let unresolved = 0;

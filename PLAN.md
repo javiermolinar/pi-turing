@@ -602,14 +602,18 @@ absent. Keep regression coverage for the working light pipeline throughout.
       missing text. No OCR/visual/browser adapter is currently approved or invoked;
       absence remains a visible capability gap, not a successful visual read.
 - [ ] Add user-controlled access escalation without login/CAPTCHA/2FA automation.
-- [ ] Add local-file selection/preview, purpose labels, limits, secret exclusions,
+- [x] Add local-file selection/preview, purpose labels, limits, secret exclusions,
       path protection, immutable run snapshots, and locally citable source records.
-- [ ] Test model/search disclosure consent, snapshot reuse/refresh, cross-project
-      isolation, and local-source behavior in reports and exports.
+      Local quote-gate views are temporary, journaled and removed before searches.
+- [x] Test separate model/search/export disclosure consent, snapshot reuse, changed
+      selection refusal, cross-project isolation, revocation, local citations and
+      export restrictions. Refresh uses a new run/approval rather than replacing
+      evidence already used by an existing report.
 
 ### M3b — Additional sources & instructions
 
-- [ ] Add the optional instruction field to start and steering flows.
+- [x] Add the optional instruction field to starts and explicitly approved,
+      paused-run context steering. Ordinary chat still cannot steer workers.
 - [ ] Resolve requested knowledge bases/skills/tools into an explicit capability
       proposal; show unavailable or unsupported requirements before starting work.
 - [ ] Bind only approved scoped tools/procedures to isolated workers; no ambient

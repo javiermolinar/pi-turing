@@ -6,7 +6,7 @@ import { inventory, RunStore } from "./store.ts";
 import { searchReports } from "./report-search.ts";
 import { validateId } from "./paths.ts";
 import type { RunState } from "./types.ts";
-import { portableMarkdown } from "./export.ts";
+import { exportAllowed, portableMarkdown } from "./export.ts";
 
 export interface DashboardServer {
   url: string; publish(state: RunState, runnerLive?: boolean): void; close(): Promise<void>;
@@ -42,7 +42,7 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
   const snapshot = (tag: string, line?: number) => {
     const state = load(tag);
     const lines = line ? state.report?.split("\n") : undefined;
-    return { tag, html: renderMain(state, liveRuns.get(tag) ?? false), at: state.updatedAt, hasReport: state.report !== undefined,
+    return { tag, html: renderMain(state, liveRuns.get(tag) ?? false), at: state.updatedAt, hasReport: state.report !== undefined && exportAllowed(state),
       ...(line && lines ? { location: { line, text: lines.slice(Math.max(0, line - 3), line + 2).join("\n") } } : {}) };
   };
   const send = (client: Client) => {

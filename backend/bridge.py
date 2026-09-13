@@ -131,6 +131,71 @@ def extraction_diagnostics(root, meta, body, offset, end):
     return result, spans[:20]
 
 
+def cleanup_local_views(vault):
+    """Crash-recoverable, temporary quote-gate views; never reusable vault evidence."""
+    journal = vault.root / ".pi-local-views.json"
+    if journal.is_symlink():
+        raise ValueError("Unsafe local-view journal")
+    if not journal.exists():
+        return
+    if journal.stat().st_size > 10_000 or vault.notes_dir.is_symlink():
+        raise ValueError("Unsafe local-view state")
+    entries = json.loads(journal.read_text())
+    if not isinstance(entries, list) or len(entries) > 8:
+        raise ValueError("Invalid local-view journal")
+    from hyperresearch.core.note import read_note
+    targets = []
+    for entry in entries:
+        if not re.fullmatch(r"local-[a-f0-9]{32}", entry["id"]):
+            raise ValueError("Invalid local-view ID")
+        path = vault.notes_dir / (entry["id"] + ".md")
+        if path.is_symlink():
+            raise ValueError("Unsafe local-view path")
+        if path.exists():
+            body = read_note(path, vault.root).body.strip()
+            if hashlib.sha256(body.encode()).hexdigest() != entry["hash"]:
+                raise ValueError("Temporary local evidence view changed; manual resolution required")
+            targets.append(path)
+    for path in targets:
+        path.unlink()
+    vault.auto_sync()
+    journal.unlink()
+
+
+def finish_with_local_evidence(vault, tag, evidence):
+    from hyperresearch.core import runs
+    from hyperresearch.core.note import write_note
+    if not isinstance(evidence, list) or len(evidence) > 8:
+        raise ValueError("Invalid local evidence")
+    prepared = []
+    for item in evidence:
+        if not re.fullmatch(r"local-[a-f0-9]{32}", item["id"]) or not isinstance(item["body"], str) or len(item["body"].encode()) > 200_000:
+            raise ValueError("Invalid local evidence entry")
+        path = vault.notes_dir / (item["id"] + ".md")
+        if path.exists() or path.is_symlink():
+            raise ValueError("Local evidence view collision")
+        body = "<!-- pi-local-evidence-view: not public corroboration -->\n\n" + item["body"].strip()
+        prepared.append({**item, "body": body})
+    if len({item["id"] for item in prepared}) != len(prepared) or sum(len(item["body"].encode()) for item in prepared) > 510_000:
+        raise ValueError("Duplicate or oversized local evidence")
+    if not prepared:
+        vault.auto_sync()
+        return runs.finish_run(vault, tag)["verify"]
+    journal = vault.root / ".pi-local-views.json"
+    fd = os.open(journal, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump([{"id": item["id"], "hash": hashlib.sha256(item["body"].encode()).hexdigest()} for item in prepared], stream)
+    try:
+        for item in prepared:
+            # No run tag, DOI, source URL or invented public identity. These are
+            # local quote-check views only. Public metadata refresh runs earlier.
+            write_note(vault.notes_dir, str(item["title"])[:500], body=item["body"], note_id=item["id"], tags=["pi-local-view"])
+        vault.auto_sync()
+        return runs.finish_run(vault, tag)["verify"]
+    finally:
+        cleanup_local_views(vault)
+
+
 def resolver_coverage(resolvers):
     if not isinstance(resolvers, list) or any(value not in ("unpaywall", "europepmc", "core") for value in resolvers):
         raise ValueError("Invalid approved resolver list")
@@ -168,6 +233,7 @@ def dispatch(action: str, args: dict):
     with Vault(root) as vault:
         if not vault.is_initialized or vault.config.research_dir != "research":
             raise ValueError("No compatible vault in the working directory")
+        cleanup_local_views(vault)
         from hyperresearch.core import runs
         if action == "create_run":
             return runs.init_run(vault, args["tag"], profile="light", query=args["query"])
@@ -176,8 +242,7 @@ def dispatch(action: str, args: dict):
         if action == "set_status":
             return runs.set_status(vault, args["tag"], args["status"], args.get("reason"))
         if action == "finish":
-            vault.auto_sync()
-            return runs.finish_run(vault, args["tag"])["verify"]
+            return finish_with_local_evidence(vault, args["tag"], args.get("localEvidence", []))
         if action == "retractions":
             # Upstream silently falls back to Semantic Scholar. It is not an
             # approved provider here; block it before cache access or transport.

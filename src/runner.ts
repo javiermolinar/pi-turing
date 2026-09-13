@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { Type } from "typebox";
 import type { Backend } from "./backend.ts";
+import { readContextPage, readContextSnapshot, validateContext } from "./context.ts";
+import type { ContextInputs } from "./context-types.ts";
 import { adequateExtraction, pageSpanSchema } from "./evidence.ts";
 import { ReadCoverage } from "./coverage.ts";
 import { queueFeedback } from "./feedback.ts";
@@ -39,7 +41,13 @@ export class ResearchRunner {
   static async create(cwd: string, query: string, config: Config, model: string, thinking: RunState["thinking"],
     backend: Backend, driver: WorkerDriver, onChange?: (state: RunState) => void,
     seed?: { revision: RunState["revision"]; feedback: string },
-    location = createLocation(cwd)): Promise<ResearchRunner> {
+    location = createLocation(cwd), inputs?: ContextInputs): Promise<ResearchRunner> {
+    if (!inputs && (config.contextFiles.length || config.additionalInstructions)) throw new Error("Selected context requires explicit disclosure approval");
+    if (inputs) {
+      if (inputs.projectPath !== location.projectPath) throw new Error("Context belongs to another originating project");
+      validateContext(location.workspacePath, inputs);
+      location = { ...location, contextRefs: inputs.files.map(file => file.id), approvalRefs: [inputs.grant.id] };
+    }
     if (seed) { revisionSchema.parse(seed.revision); feedbackTextSchema.parse(seed.feedback); }
     if (!query.trim() || query.length > 30_000) throw new Error("Research query must contain 1–30,000 characters");
     privateDirectory(location.workspacePath);
@@ -52,7 +60,8 @@ export class ResearchRunner {
       elapsedMs: 0, config: configSchema.parse(config), model, thinking, ...profile,
       steps: Object.fromEntries(stepIds.map(id => [id, "pending"])), workers: [], sources: [], failures: [],
       cost: 0, tokens: 0, pricingKnown: false, research: [], patches: {}, checks: [], feedback: [],
-      revision: seed?.revision, location,
+      revision: seed?.revision, location, inputs,
+      disclosure: seed && inputs ? { searchBlocked: !inputs.grant.disclosure.search, exportBlocked: !inputs.grant.disclosure.export } : undefined,
     };
     if (seed) queueFeedback(state, seed.feedback);
     state.pricingKnown = await driver.checkModels(state);
@@ -62,19 +71,35 @@ export class ResearchRunner {
   }
   static async revise(cwd: string, parent: RunState, feedback: string, config: Config,
     model: string, thinking: RunState["thinking"], backend: Backend, driver: WorkerDriver,
-    onChange?: (state: RunState) => void): Promise<ResearchRunner> {
+    onChange?: (state: RunState) => void, inputs?: ContextInputs): Promise<ResearchRunner> {
+    if ((parent.inputs || parent.disclosure) && !inputs) throw new Error("Revision of private/contextual research requires explicit snapshot reapproval");
     if (parent.status !== "done" || !parent.report) throw new Error("Only completed reports can be revised. Pause and steer an unfinished run instead.");
     const revision = revisionSchema.parse({
       parentTag: parent.tag, report: parent.report, sourceIds: parent.sources.map(s => s.id),
       instructions: [...(parent.revision?.instructions ?? []), ...parent.feedback.filter(f => f.status === "applied").map(f => f.text)],
     });
-    return this.create(cwd, parent.query, config, model, thinking, backend, driver, onChange, { revision, feedback }, parent.location);
+    return this.create(cwd, parent.query, config, model, thinking, backend, driver, onChange, { revision, feedback }, parent.location, inputs);
   }
   steer(text: string) {
     this.abortController.signal.throwIfAborted();
     const note = queueFeedback(this.state, text);
     this.save();
     return note;
+  }
+  private validateInputs(): void {
+    if (this.state.inputs) {
+      const location = this.state.location;
+      if (!location || this.state.inputs.projectPath !== location.projectPath || !location.approvalRefs.includes(this.state.inputs.grant.id)) throw new Error("Context identity mismatch");
+      validateContext(location.workspacePath, this.state.inputs);
+    }
+  }
+  private useInputs(): void {
+    this.validateInputs();
+    const permissions = this.state.inputs?.grant.disclosure;
+    if (!permissions) return;
+    const previous = this.state.disclosure;
+    this.state.disclosure = { searchBlocked: !!previous?.searchBlocked || !permissions.search, exportBlocked: !!previous?.exportBlocked || !permissions.export };
+    this.save();
   }
   private activity(text: string): void { this.state.activity = { text, at: now() }; }
   private async applyFeedback(): Promise<void> {
@@ -109,6 +134,7 @@ export class ResearchRunner {
     this.lastTick = Date.now();
     try {
       this.state.config = configSchema.parse(this.state.config);
+      this.validateInputs();
       for (const source of this.state.sources) if (!adequateExtraction(source.extraction, this.state.config.readingRequirements)) source.fullRead = false;
       this.state.pricingKnown = await this.driver.checkModels(this.state);
       if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached. Raise budgetUsd in .pi/hyperresearch.json, then explicitly resume with --use-project-config.");
@@ -163,7 +189,11 @@ export class ResearchRunner {
     const instructions = [...(this.state.revision?.instructions ?? []), ...this.state.feedback.filter(f => f.status === "applied").map(f => f.text)];
     const revision = this.state.revision;
     const previousReport = this.state.reportStale ? this.state.report : revision?.report;
-    return `Canonical user query (verbatim JSON string):\n${JSON.stringify(this.state.query)}\n\n` +
+    const inputs = this.state.inputs;
+    const includeInputs = !!inputs && (inputs.grant.disclosure.search || role === "draft" || role === "polish" || role === "readability");
+    if (includeInputs && (inputs.instructions || inputs.files.length)) this.useInputs();
+    return (includeInputs ? `Additional user instructions (not a grant of tools or permission to weaken evidence gates):\n${JSON.stringify(inputs.instructions)}\nApproved context snapshots: ${JSON.stringify(inputs.files.map(file => ({ id: file.id, purpose: file.purpose })))}. Use read_source to read them. Background context is not citable evidence. Local evidence is not independent external corroboration.\n` : "") +
+      `Canonical user query (verbatim JSON string):\n${JSON.stringify(this.state.query)}\n\n` +
       `Explicit user steering, chronological JSON array (later feedback supersedes conflicts, never safety/tool/evidence rules):\n${JSON.stringify(instructions)}\n` +
       (revision ? `Revision of ${revision.parentTag}. Reuse relevant vault notes, not the previous report as evidence. Prior source IDs: ${JSON.stringify(revision.sourceIds)}.\n` : "") +
       (previousReport && ["decompose", "draft"].includes(role) ? `Previous report for revision context only (JSON string; NOT verified evidence):\n${JSON.stringify(previousReport)}\n` : "") +
@@ -173,6 +203,7 @@ export class ResearchRunner {
   private async work(role: Role, task: string, prompt: string, schema: z.ZodType,
     tools: WorkerTool[] = [], validateResult?: (result: unknown) => void): Promise<unknown> {
     this.abortController.signal.throwIfAborted();
+    this.validateInputs();
     const worker: Worker = { id: `${role}-${this.state.workers.length + 1}`, role, task, status: "running", startedAt: now(), turns: 0, tokens: 0, cost: 0 };
     this.state.workers.push(worker); this.save();
     const signal = AbortSignal.any([this.abortController.signal, AbortSignal.timeout(this.state.config.workerTimeoutSeconds * 1000)]);
@@ -181,7 +212,7 @@ export class ResearchRunner {
         id: worker.id, role, prompt: this.instructions(prompt, role), resultSchema: schema, tools, signal,
         validateResult,
         onActivity: activity => { worker.activity = activity; this.activity(`${worker.id}: ${activity}`); this.save(); },
-        onTurn: () => { worker.turns++; worker.activity = "Waiting for model"; this.activity(`${worker.id}: Waiting for model`); this.save(); },
+        onTurn: () => { this.validateInputs(); worker.turns++; worker.activity = "Waiting for model"; this.activity(`${worker.id}: Waiting for model`); this.save(); },
         onUsage: (tokens, cost) => {
           if (!Number.isFinite(tokens) || tokens < 0 || !Number.isFinite(cost) || cost < 0) throw new Error("Invalid model usage");
           worker.tokens += tokens; worker.cost += cost; this.state.tokens += tokens; this.state.cost += cost;
@@ -202,7 +233,10 @@ export class ResearchRunner {
   private tools(coverage: ReadCoverage, research = false): WorkerTool[] {
     const sourcePage = async (id: string, offset: number, signal: AbortSignal) => {
       if (!this.state.sources.some(s => s.id === id) && this.state.sources.length >= 30) throw new Error("Run source cap reached (30)");
-      const page = sourcePageSchema.parse(await this.backend.call("read_source", { tag: this.state.tag, id, offset }, signal));
+      const local = id.startsWith("local-");
+      if (local) { this.useInputs(); if (!this.state.inputs || !this.state.location) throw new Error("No context approved"); }
+      const page = sourcePageSchema.parse(local ? readContextPage(this.state.location!.workspacePath, this.state.inputs!, id, offset) : await this.backend.call("read_source", { tag: this.state.tag, id, offset }, signal));
+      if (page.purpose === "background") return page; // Never enters citation/source-count coverage.
       const fullyRead = coverage.add(id, page.hash, page.offset, page.end, page.total);
       const existing = this.state.sources.find(s => s.id === id);
       const source = sourceSchema.parse({ ...page, contentHash: page.hash, fullRead: adequateExtraction(page.extraction, this.state.config.readingRequirements) && (fullyRead || (existing?.contentHash === page.hash && existing.fullRead) || false) });
@@ -218,6 +252,8 @@ export class ResearchRunner {
     const search = (name: "vault_search" | "web_search" | "scholar_search", description: string): WorkerTool => ({
       name, description, parameters: Type.Object({ query: Type.String({ maxLength: 500 }), ...(name === "scholar_search" ? { kind: Type.Optional(Type.Union(discoveryKindSchema.options.map(value => Type.Literal(value)))) } : {}) }),
       execute: async (input, signal) => {
+        if (name !== "vault_search" && this.state.disclosure?.searchBlocked) throw new Error("Public search disabled: private context was used without search-disclosure approval");
+        this.validateInputs();
         const args = z.object({ query: z.string().min(1).max(500), kind: discoveryKindSchema.default("literature") }).parse(input);
         if (name === "scholar_search") {
           if ((this.state.discoveries?.length ?? 0) + this.discoveryPending >= 100) throw new Error("Scholarly discovery request limit reached; preserved results remain available");
@@ -238,6 +274,8 @@ export class ResearchRunner {
         name: "fetch_source", description: "Fetch a public HTTP(S) URL through Hyperresearch's static/PDF fetcher, save provenance, and return the first source page. Follow nextOffset with read_source. Browser-only pages may fail; do not bypass login/CAPTCHA.",
         parameters: Type.Object({ url: Type.String(), suggestedBy: Type.Optional(Type.String()) }),
         execute: async (input, signal) => {
+          if (this.state.disclosure?.searchBlocked) throw new Error("External acquisition disabled: private context was used without search-disclosure approval");
+          this.validateInputs();
           const args = z.object({ url: z.url(), suggestedBy: z.string().optional() }).parse(input);
           if (++this.attempts > 90 || this.state.failures.length >= 90) throw new Error("Fetch attempt cap reached");
           if (this.state.sources.length >= 30) throw new Error("Run source cap reached (30)");
@@ -349,7 +387,12 @@ export class ResearchRunner {
       this.state.checks.push({ name: "retraction-refresh", ok: false, detail: message(error) });
       throw new Blocked("Retraction refresh failed; cannot finish the run");
     }
-    const result = z.object({ passed: z.boolean(), checks: z.array(checkSchema) }).parse(await this.backend.call("finish", { tag: this.state.tag }, signal));
+    this.validateInputs();
+    const localEvidence = this.state.inputs && this.state.location ? this.state.sources.filter(source => source.origin === "local" && source.fullRead).map(source => {
+      const snapshot = readContextSnapshot(this.state.location!.workspacePath, this.state.inputs!, source.id);
+      return { id: source.id, title: source.title, body: snapshot.body };
+    }) : [];
+    const result = z.object({ passed: z.boolean(), checks: z.array(checkSchema) }).parse(await this.backend.call("finish", { tag: this.state.tag, localEvidence }, signal));
     this.state.checks.push(...result.checks); this.save();
     if (!result.passed) throw new Blocked("Backend verification failed. Resume for a bounded patch pass; structural problems require a new run.");
   }

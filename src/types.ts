@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAbsolute } from "node:path";
+import { contextFileRequestSchema, contextInputsSchema } from "./context-types.ts";
 import { extractionSchema, readingRequirementSchema } from "./evidence.ts";
 import { searchProviderSchema } from "./search.ts";
 import { discoveryBatchSchema, scholarlyProviderSchema } from "./discovery-types.ts";
@@ -13,6 +14,8 @@ export const roles = ["decompose", "research", "draft", "polish", "readability"]
 export type Role = typeof roles[number];
 export const thinkingSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const configSchema = z.object({
+  contextFiles: z.array(contextFileRequestSchema).max(8).default([]),
+  additionalInstructions: z.string().max(4000).default(""),
   searchProvider: searchProviderSchema.default("brave"),
   scholarlyProviders: z.array(scholarlyProviderSchema).max(7).default(["openalex", "crossref"]),
   readingRequirements: z.array(readingRequirementSchema).max(4).default([]),
@@ -43,6 +46,8 @@ export const checkSchema = z.object({ name: z.string(), ok: z.boolean(), detail:
 export type Check = z.infer<typeof checkSchema>;
 export const sourceSchema = z.object({
   id: z.string(), title: z.string(), url: z.string(), words: z.number(),
+  origin: z.enum(["public", "local", "integration"]).optional(),
+  purpose: z.enum(["background", "evidence"]).optional(),
   retrievedAt: z.string().optional(), contentHash: z.string().optional(), fullRead: z.boolean().default(false),
   extraction: extractionSchema.optional(),
   oa: z.unknown().optional(),
@@ -74,9 +79,10 @@ export const stateSchema = z.object({
   location: z.object({
     projectPath: z.string().refine(isAbsolute), dataRoot: z.string().refine(isAbsolute),
     workspaceId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/), workspacePath: z.string().refine(isAbsolute),
-    // No local context or integration grants exist in the light pipeline yet.
-    contextRefs: z.array(z.string()).max(0), approvalRefs: z.array(z.string()).max(0),
+    contextRefs: z.array(z.string()).max(100), approvalRefs: z.array(z.string()).max(20),
   }).strict().optional(),
+  inputs: contextInputsSchema.optional(),
+  disclosure: z.object({ searchBlocked: z.boolean(), exportBlocked: z.boolean() }).strict().optional(),
   query: z.string().min(1).max(30_000),
   profile: z.literal("light"),
   status: z.enum(["paused", "running", "blocked", "done", "aborted", "failed"]),

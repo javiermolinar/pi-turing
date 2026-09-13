@@ -25,7 +25,8 @@ implementation session. Add evidence before changing a row to verified parity.
 | Open-access full-text resolution | Temporary composed upstream resolver, separate opt-in `fullTextResolvers` approval | `tests/approval_test.py`; unapproved resolvers never execute, missing credentials are explicit, contact comes from the environment rather than ambient vault settings. Resolver availability is not proof that a candidate was read; extraction diagnostics and TypeScript replacement pending |
 | Complete source reading | Paged reads pinned to content hashes | `tests/core.test.ts`, `tests/runner.test.ts`; extracted text coverage is not visual/PDF comprehension |
 | Browser/OCR/visual reading | Not implemented | Must be approved scoped readers; no login/CAPTCHA/2FA automation |
-| Local files and additional capabilities | Not implemented | M3 consent, snapshot, definition-pinning, revocation and disclosure contracts pending |
+| Local files and additional instructions | Implemented for bounded, explicitly selected UTF-8 files | `tests/context.test.ts`, runner/extension tests, `tests/local_evidence_test.py`, Playwright export-denial tests; separate model/search/export consent, immutable snapshots, purpose/citation distinctions, pinned revisions, revocation and crash-cleaned temporary quote views. File refresh requires a fresh run/approval |
+| Additional scoped capabilities | Pending | Integration resolution, procedure-definition pinning and revoked/changed tool-binding tests remain M3b work; no ambient skills/tools are inherited |
 | Contradiction/depth/reconciliation/digest | Not implemented | M4 scheduling, evidence fixtures and evaluations pending |
 | Corpus critique / independence analysis | Not implemented | Syndication/shared-primary-evidence fixtures and persisted findings pending |
 | Claim-support audit and re-audit | Not implemented | Current structural/quote gates cannot establish factual support or truth |

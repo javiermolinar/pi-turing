@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { lockDataRoot } from "../src/locks.ts";
@@ -42,6 +42,29 @@ test("bare picker, list, status and denied cross-project resume never mutate che
     await h.command(`resume ${state.tag} --use-project-config`);
     assert.match(proposals[1], /Proposed configuration replacement/); assert.match(proposals[1], /Search: duckduckgo/);
     assert.deepEqual(readFileSync(join(store.dir, "pi-state.json")), before);
+  } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("paused context proposals require separate disclosures, preserve origin, and only queue approved steering", async () => {
+  const root = mkdtempSync(join(tmpdir(), "hpr-context-command-")); const h = harness(root);
+  try {
+    const origin = join(root, "origin"); privateDirectory(origin); writeFileSync(join(origin, "design.md"), "Original project's selected evidence.");
+    const other = join(root, "other"); privateDirectory(other); writeFileSync(join(other, "design.md"), "Unapproved other project's file.");
+    const state = fixture(); state.status = "paused"; state.location = createLocation(origin, root); privateDirectory(state.location.workspacePath);
+    const store = new RunStore(root, state.tag); store.save(state); h.ctx.cwd = other;
+    const prompts: string[] = []; const approvals = [true, false, true, false, false];
+    h.ctx.ui.confirm = async (title: string) => { prompts.push(title); return approvals.shift() ?? false; };
+    h.ctx.ui.input = async (title: string) => title.startsWith("Additional") ? "Prioritize our design" : "design.md";
+    h.ctx.ui.select = async () => "Local evidence (not independent external corroboration)";
+    await h.command(`context ${state.tag}`);
+    const saved = store.load(); assert.equal(saved.status, "paused"); assert.equal(saved.feedback[0].status, "queued");
+    assert.deepEqual(saved.inputs?.grant.disclosure, { model: true, search: false, export: false });
+    assert.equal(saved.inputs?.projectPath, saved.location?.projectPath);
+    assert.match(saved.inputs!.files[0].originalPath, /origin\/design.md$/);
+    assert.ok(prompts.includes("Allow context in public search/acquisition requests?")); assert.ok(prompts.includes("Allow exporting reports derived from this context?"));
+    assert.equal(saved.workers.length, state.workers.length);
+    await h.command(`save ${state.tag} ${join(other, "report.md")}`); assert.equal(existsSync(join(other, "report.md")), false);
+    assert.match(h.notices.at(-1)!, /Export not approved/);
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
 });
 

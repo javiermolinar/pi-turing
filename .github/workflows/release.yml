@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Validate version tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      archive: ${{ steps.version.outputs.archive }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.x"
+      - name: Match tag to package and lockfile
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+          assert.equal(pkg.name, 'pi-hyperresearch');
+          assert.equal(typeof pkg.version, 'string');
+          const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(pkg.version);
+          assert.ok(match, 'Use X.Y.Z or X.Y.Z-prerelease versions');
+          assert.ok(!match[4]?.split('.').some(part => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0')), 'Prerelease numbers must not have leading zeroes');
+          const tag = `v${pkg.version}`;
+          assert.equal(process.env.RELEASE_TAG, tag, 'Tag must match package.json version');
+          assert.equal(lock.version, pkg.version, 'Lockfile version must match package.json');
+          assert.equal(lock.packages[''].version, pkg.version, 'Lockfile root package must match package.json');
+          appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\narchive=${pkg.name}-${pkg.version}.tgz\nprerelease=${Boolean(match[4])}\n`);
+          NODE
+
+  checks:
+    name: Release checks
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish GitHub release
+    needs: [version, checks]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-package
+          path: release-package
+      - name: Create release with the tested package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          ARCHIVE: ${{ needs.version.outputs.archive }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          test -f "release-package/$ARCHIVE"
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" "release-package/$ARCHIVE" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            --title "$RELEASE_TAG" "${flags[@]}"

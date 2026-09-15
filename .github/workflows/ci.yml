@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.13.0", "22.x", "24.x", "26.x"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+
+  browser:
+    name: Browser checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.x"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Save browser previews
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-previews
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
+  package:
+    name: Package contents
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.x"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Pack and check distributable files
+        run: |
+          mkdir -p "$RUNNER_TEMP/package"
+          npm pack --ignore-scripts --json --pack-destination "$RUNNER_TEMP/package" > "$RUNNER_TEMP/package/manifest.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const [pack] = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/package/manifest.json`, 'utf8'));
+          const files = new Set(pack.files.map(file => file.path));
+          for (const required of ['package.json', 'extensions/index.ts', 'src/runner.ts', 'src/source-id.ts', 'web/app.js', 'web/style.css', 'skills/hyperresearch/SKILL.md', 'README.md', 'LICENSE']) {
+            assert.ok(files.has(required), `Missing package file: ${required}`);
+          }
+          for (const file of files) {
+            assert.ok(!/^(?:\.pi|\.github|\.hyperresearch|\.pi-research|research|artifacts|tests|backend|node_modules)\//.test(file), `Unexpected package file: ${file}`);
+            assert.ok(!/^(?:PLAN|PARITY|INTEGRATIONS)\.md$/.test(file), `Retired document in package: ${file}`);
+          }
+          console.log(`Validated ${pack.filename}: ${files.size} files`);
+          NODE
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-package
+          path: ${{ runner.temp }}/package/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true

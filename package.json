@@ -26,13 +26,11 @@
     "skills",
     "assets",
     "README.md",
-    "INTEGRATIONS.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
-    "migrate": "tsx scripts/migrate.ts",
     "typecheck": "tsc --noEmit",
     "test:backend": "tsx --test tests/native-backend.test.ts tests/native-runner.test.ts tests/extraction.test.ts tests/public-http.test.ts",
     "test:browser": "tsx scripts/preview.ts && tsx scripts/preview-inventory.ts && tsx scripts/preview-notebook.ts && tsx scripts/preview-controls.ts"

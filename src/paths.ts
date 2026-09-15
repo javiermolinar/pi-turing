@@ -62,6 +62,6 @@ export function requireLocation(state: RunState, root: string): NonNullable<RunS
   }
   const workspace = safePath(root, "workspaces", location.workspaceId);
   if (!lstatSync(workspace).isDirectory()) throw new Error(`Missing workspace: ${workspace}`);
-  safePath(workspace, ".hyperresearch"); safePath(workspace, "research");
+  safePath(workspace, ".pi-research"); safePath(workspace, ".hyperresearch"); safePath(workspace, "research");
   return location;
 }

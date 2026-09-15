@@ -1,6 +1,6 @@
 import { Input, SelectList, truncateToWidth, type Component, type Focusable } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { cleanTerminal, type RunState } from "./types.ts";
+import { cleanTerminal, isReadOnlyRun, type RunState } from "./types.ts";
 import type { Inventory } from "./store.ts";
 
 export interface PickerRow { id: string; title: string; description: string; details: string[] }
@@ -19,6 +19,7 @@ export function pickerRows(inventory: Inventory, activeTag?: string): PickerRow[
 export type RunAction = "View" | "Export Markdown" | "Save report…" | "Resume" | "Revise" | "Steer" | "Pause" | "Cancel";
 export function runActions(state: RunState, ownership: "session" | "external" | "saved", workspaceAvailable: boolean): RunAction[] {
   const actions: RunAction[] = state.report !== undefined ? ["View", "Export Markdown", "Save report…"] : ["View"];
+  if (isReadOnlyRun(state)) return actions;
   if (ownership === "session") return [...actions, "Steer", "Pause", "Cancel"];
   if (ownership === "external" || !workspaceAvailable) return actions;
   if (state.status === "done" && state.report) actions.push("Revise");
@@ -38,7 +39,7 @@ export class RunPicker implements Component, Focusable {
     private done: (id: string | null) => void, private redraw: () => void, private maxRows = 8) { this.rebuild(); }
   private rebuild() {
     const query = cleanTerminal(this.input.getValue()).toLowerCase();
-    this.visible = [{ id: "_new", title: "New research", description: "Propose scope and cost before starting", details: ["Start a separate investigation. No files or integrations are attached implicitly."] },
+    this.visible = [{ id: "_new", title: "New research", description: "Start light research with cost approval", details: ["Start a separate investigation. No files or integrations are attached implicitly."] },
       ...this.rows.filter(row => [row.title, row.id, ...row.details].join(" ").toLowerCase().includes(query))];
     this.selected = 0;
     this.list = new SelectList(this.visible.map(row => ({ value: row.id, label: row.title, description: row.description })), Math.max(1, this.maxRows), {

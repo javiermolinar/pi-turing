@@ -29,8 +29,10 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
-Registration is not research approval. Select `architecture` in the start/context
-flow, or propose `"capabilities": ["architecture"]` in project preferences.
+Registration is not research approval. Select `architecture` through
+`/hyperresearch context` on a paused run, or propose
+`"capabilities": ["architecture"]` in project preferences. Ordinary starts skip
+the optional context questionnaire; configured selections still require approval.
 Model use, public-search disclosure, and derived-report export remain separate
 approvals. Paused-run additions queue a replan; they do not start workers.
 
@@ -99,7 +101,7 @@ exports do not require contacting the integration.
 Text adapters do not certify OCR, visual comprehension, equations, table layout,
 or full-document truth. They cannot clear configured visual-reading requirements.
 Local/private records are not independent external corroboration. Public metadata
-refresh currently covers only the retained backend's public-source notes; scoped
+refresh covers only DOI-bearing public sources through approved OpenAlex; scoped
 snapshots retain an explicit unknown retraction status rather than sending private
 documents or identifiers to an unapproved metadata service.
 

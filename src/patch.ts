@@ -16,9 +16,9 @@ export function applyPatch(report: string, input: unknown): { report: string; pa
   if (changed > report.length * 0.15) throw new Error("Patch exceeds 15% of report; structural changes require a new run");
   let result = report;
   for (const span of spans.reverse()) result = result.slice(0, span.start) + span.replacement + result.slice(span.end);
+  const headings = (text: string) => text.split("\n").filter(line => /^ {0,3}#{1,6}\s|^ {0,3}(?:=+|-+)\s*$/.test(line));
+  if (JSON.stringify(headings(report)) !== JSON.stringify(headings(result))) throw new Error("Heading/structure changes require an explicit new pass or revision");
   return { report: result, patch };
 }
 
-export function citationIds(report: string): string[] {
-  return [...new Set([...report.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)].map(match => match[1]))];
-}
+export { citationIds } from "./markdown-syntax.ts";

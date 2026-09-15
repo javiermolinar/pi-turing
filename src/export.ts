@@ -3,9 +3,9 @@ import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, linkSync
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
-import { type RunState } from "./types.ts";
+import { isReadOnlyRun, type RunState } from "./types.ts";
 import { validateContextApproval } from "./context.ts";
-import { mathAt } from "./report.ts";
+import { reportSyntax, resolveSourceLink } from "./markdown-syntax.ts";
 
 const mdText = (text: string) => text.replace(/[\x00-\x1f\x7f]/g, " ").replace(/[\\`*_[\]<>]/g, "\\$&");
 export function publicUrl(raw: string): string | undefined {
@@ -35,38 +35,16 @@ export function portableMarkdown(state: RunState): string {
   const link = (label: string, href?: string) => href ? `[${label}](<${href}>)` : `${label} (unresolved or nonportable link)`;
   const resolveLink = (href: string): string | undefined => {
     if (/^#[^\s<>]*$/.test(href)) return href;
-    const direct = publicUrl(href); if (direct) return direct;
-    const match = /^(?:\.\/)?(?:(?:research\/)?notes\/)?([^/#]+)\.md(?:#(.*))?$/.exec(href);
-    if (!match) return;
-    try {
-      const source = sources.get(decodeURIComponent(match[1])); const url = source && publicUrl(source.url);
-      if (!url) return;
-      const parsed = new URL(url); if (match[2]) parsed.hash = match[2]; return publicUrl(parsed.href);
-    } catch { return; }
+    return resolveSourceLink(href, sources, publicUrl);
   };
-  const parser = new Marked({ extensions: [
-    { name: "exportMath", level: "inline", start: source => source.search(/\\[([]|\$/), tokenizer: source => {
-      const match = mathAt(source); if (match) return { type: "exportMath", raw: match.raw };
-    } },
-    { name: "exportMathBlock", level: "block", start: source => { const match = /(?:^|\n) {0,3}(?:\\\[|\$\$)/.exec(source); return match?.index; }, tokenizer: source => {
-      const indent = /^ {0,3}/.exec(source)![0]; const match = mathAt(source.slice(indent.length));
-      if (match?.display) {
-        const ending = /^[ \t]*(?:\n|$)/.exec(source.slice(indent.length + match.raw.length));
-        if (ending) return { type: "exportMathBlock", raw: indent + match.raw + ending[0] };
-      }
-    } },
-    { name: "exportCitation", level: "inline", start: source => source.indexOf("[["), tokenizer: source => {
-      const match = /^\[\[([^\]\n|#]+)(?:#([^\]\n|]+))?(?:\|([^\]\n]+))?\]\]/.exec(source);
-      if (match) return { type: "exportCitation", raw: match[0], id: match[1].trim(), fragment: match[2], label: match[3] };
-    } },
-  ] });
+  const parser = new Marked({ extensions: reportSyntax });
   const tokens = parser.lexer(state.report);
   function render(items: Token[]): string { return items.map(renderToken).join(""); }
   function renderToken(token: Token): string {
     const t = token as any;
     switch (token.type) {
-      case "code": case "codespan": case "escape": case "exportMath": case "exportMathBlock": return token.raw;
-      case "exportCitation": {
+      case "code": case "codespan": case "escape": case "reportMathInline": case "reportMathBlock": return token.raw;
+      case "reportCitation": {
         const source = sources.get(t.id); const href = source && publicUrl(source.url);
         if (!href) { unresolved++; return source ? `\\[Local/nonportable evidence ${source.number}: not included\\]` : "\\[Unresolved citation\\]"; }
         const url = new URL(href); if (t.fragment) url.hash = t.fragment;
@@ -103,9 +81,9 @@ export function portableMarkdown(state: RunState): string {
     }
   }
   const report = render(tokens).trim();
-  const stale = state.reportStale ? "STALE DRAFT" : state.status !== "done" || state.checks.some(check => !check.ok) ? "UNVERIFIED DRAFT" : "Completed light-pipeline report";
+  const stale = state.reportStale ? "STALE DRAFT" : state.status !== "done" || state.checks.some(check => !check.ok) ? "UNVERIFIED DRAFT" : `Completed ${state.profile}-pipeline report`;
   const failed = state.checks.filter(check => !check.ok).map(check => mdText(check.name));
-  const header = `> ${stale} · Run ${state.tag}\n> Verification: light-mode structural/quote checks only; no sentence-level claim-support audit.\n> Export is a copy, not proof of factual accuracy.${unresolved ? ` ${unresolved} unresolved/nonportable links or citations remain explicitly marked.` : ""}${failed.length ? ` Unresolved checks: ${failed.join(", ")}.` : ""}\n> No source bodies or local attachments are included. Review the report for sensitive content before sharing.\n\n`;
+  const header = `> ${stale} · Run ${state.tag}\n> Verification: ${!isReadOnlyRun(state) ? "light-mode structural/quote checks only; no sentence-level claim-support audit." : "historical full/extended checks only; execution code has been removed and this version has not revalidated the report. Private review metadata is not bundled."}\n> Export is a copy, not proof of factual accuracy.${unresolved ? ` ${unresolved} unresolved/nonportable links or citations remain explicitly marked.` : ""}${failed.length ? ` Unresolved checks: ${failed.join(", ")}.` : ""}\n> No source bodies or local attachments are included. Review the report for sensitive content before sharing.\n\n`;
   const sourceList = state.sources.map((source, index) => {
     const url = publicUrl(source.url);
     if (!url) return `- [${index + 1}] Local/nonportable evidence — not included.`;

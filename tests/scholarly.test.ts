@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { scholarlyAdapters, invertAbstract, normalizeDoi } from "../src/scholarly-providers.ts";
 import { consolidateWorks, ScholarlyDiscovery } from "../src/scholarly.ts";
 import { ResearchServices } from "../src/services.ts";
+import { forbiddenEvidence } from "./fixtures.ts";
 import { configSchema } from "../src/types.ts";
 
 const at = "2026-09-13T10:00:00Z";
@@ -118,8 +119,8 @@ test("output truncation and rate-limit backoff remain explicit rather than fabri
 
 test("composed discovery never invokes Python or a storage operation", async () => {
   let storageCalls = 0;
-  const service = new ResearchServices({ async call<T>() { storageCalls++; throw new Error("Storage must not handle discovery"); } },
+  const service = new ResearchServices(forbiddenEvidence(() => { storageCalls++; }),
     new ScholarlyDiscovery({ env: {}, fetchImpl: async () => Response.json({ results: [alexRecord] }) }));
-  const result: any = await service.call("scholar_search", { query: "sources", providers: ["openalex"] });
+  const result = await service.searchScholarly("sources", ["openalex"]);
   assert.equal(result.results.length, 1); assert.equal(storageCalls, 0);
 });

@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { configSchema, stateSchema } from "../src/types.ts";
 import { ensureSearchConfigured, parseDuckDuckGo, webSearch } from "../src/search.ts";
-import { PythonBackend } from "../src/backend.ts";
 import { fixture } from "./fixtures.ts";
 
 const ddgPage = `<html><div class="result results_links">
@@ -12,12 +11,18 @@ const ddgPage = `<html><div class="result results_links">
 <div class="result"><a class="result__a" href="javascript:alert(1)">Unsafe</a></div>
 <div class="result"><a class="result__a" href="https://user:password@example.com">Credentials</a></div></html>`;
 
-test("Brave is the explicit default; legacy provider config is rejected but checkpoints remain readable", () => {
-  assert.equal(configSchema.parse({}).searchProvider, "brave");
-  assert.equal(configSchema.parse({ searchProvider: "duckduckgo" }).searchProvider, "duckduckgo");
-  for (const provider of ["parallel", "serply", "auto"]) assert.throws(() => configSchema.parse({ searchProvider: provider }));
-  const state = fixture(); state.config.searchProvider = "parallel";
-  assert.equal(stateSchema.parse(state).config.searchProvider, "parallel");
+test("DuckDuckGo is the keyless default; explicit and historical providers are preserved", () => {
+  assert.equal(configSchema.parse({}).searchProvider, "duckduckgo");
+  assert.doesNotThrow(() => ensureSearchConfigured(configSchema.parse({}).searchProvider, {}));
+  for (const provider of ["brave", "duckduckgo", "tavily", "serply", "kagi"]) assert.equal(configSchema.parse({ searchProvider: provider }).searchProvider, provider);
+  for (const provider of ["parallel", "auto"]) assert.throws(() => configSchema.parse({ searchProvider: provider }));
+  const state = fixture();
+  for (const provider of ["brave", "duckduckgo", "parallel"] as const) {
+    state.config.searchProvider = provider;
+    assert.equal(stateSchema.parse(state).config.searchProvider, provider);
+  }
+  const { searchProvider: _provider, ...legacyConfig } = state.config;
+  assert.equal(stateSchema.parse({ ...state, config: legacyConfig }).config.searchProvider, "brave");
   assert.throws(() => ensureSearchConfigured("brave", {}), /BRAVE_SEARCH_API_KEY/);
   assert.doesNotThrow(() => ensureSearchConfigured("duckduckgo", {}));
 });
@@ -76,7 +81,8 @@ test("CAPTCHAs, unknown layouts, throttling and missing keys fail without fallba
   for (const body of [{}, { error: "provider error" }, { type: "ErrorResponse" }]) {
     await assert.rejects(webSearch("brave", "test", { env: { BRAVE_SEARCH_API_KEY: "test" }, fetchImpl: async () => Response.json(body) }), /malformed/);
   }
-  await assert.rejects(new PythonBackend(process.cwd()).call("web_search", { provider: "parallel", query: "test" }));
+  // Runtime callers cannot re-enable the removed provider through a cast.
+  await assert.rejects(webSearch("parallel" as any, "test"));
 });
 
 test("search output is capped, hostile fences are neutralized, and cancellation is honored", async () => {

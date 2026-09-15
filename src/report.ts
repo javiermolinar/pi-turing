@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Marked, type TokenizerExtension } from "marked";
+import { Marked, type Token, type Tokens } from "marked";
+import { citationTokenizer, mathBlock, mathInline, reportSyntax, resolveSourceLink, sourceNoteReference } from "./markdown-syntax.ts";
 import katex from "katex";
 import sanitizeHtml from "sanitize-html";
 import type { Source } from "./types.ts";
@@ -16,27 +17,57 @@ function externalUrl(raw: string): string | undefined {
   } catch { return; }
 }
 
-function isEscaped(text: string, index: number): boolean {
-  let count = 0;
-  while (index > 0 && text[--index] === "\\") count++;
-  return count % 2 === 1;
-}
-
-/** Recognize TeX before Markdown consumes backslash escapes. Never runs in code tokens. */
-export function mathAt(source: string): { raw: string; text: string; display: boolean } | undefined {
-  const delimiters = [["\\[", "\\]", true], ["$$", "$$", true], ["\\(", "\\)", false], ["$", "$", false]] as const;
-  for (const [open, close, display] of delimiters) {
-    if (!source.startsWith(open)) continue;
-    if (open === "$" && (source.startsWith("$$") || /\s/.test(source[1] ?? ""))) return;
-    let end = source.indexOf(close, open.length);
-    while (end >= 0 && isEscaped(source, end)) end = source.indexOf(close, end + close.length);
-    if (end < 0) return;
-    const text = source.slice(open.length, end);
-    if (!text.trim()) return;
-    // Avoid interpreting common currency prose ($15 and $30) as TeX.
-    if (open === "$" && (text.includes("\n") || /\s$/.test(text) || /[\d$]/.test(source[end + 1] ?? ""))) return;
-    return { raw: source.slice(0, end + close.length), text, display };
+/** Distinct saved sources referenced by prose. Reuse rendering's URL policy;
+ * ambiguous external URLs, code, math, raw HTML and image alt text do not count. */
+export function reportSourceIds(markdown: string, sources: Source[]): string[] {
+  const sourceMap = new Map(sources.map(source => [source.id, source]));
+  const byUrl = new Map<string, Set<string>>();
+  const canonical = (raw: string) => {
+    const href = externalUrl(raw);
+    if (!href) return;
+    const url = new URL(href); url.hash = ""; return url.href;
+  };
+  for (const source of sources) {
+    const url = canonical(source.url);
+    if (!url) continue;
+    const ids = byUrl.get(url) ?? new Set<string>(); ids.add(source.id); byUrl.set(url, ids);
   }
+  const ids = new Set<string>();
+  const visit = (tokens: Token[]) => {
+    for (const token of tokens) {
+      switch (token.type) {
+        case "reportCitation": {
+          const source = sourceMap.get(token.id);
+          if (source && (externalUrl(source.url) || source.origin === "local" || (source.origin === "integration" && source.integration?.visibility === "private"))) ids.add(source.id);
+          break;
+        }
+        case "link": {
+          const target = (token as Tokens.Link).href;
+          const href = resolveSourceLink(target, sourceMap, externalUrl);
+          const note = sourceNoteReference(target);
+          if (href && note && sourceMap.has(note.id)) ids.add(note.id);
+          else {
+            const url = href && canonical(href);
+            const matches = url && byUrl.get(url);
+            if (matches && matches.size === 1) ids.add([...matches][0]);
+          }
+          visit((token as Tokens.Link).tokens);
+          break;
+        }
+        case "paragraph": case "heading": case "text": case "blockquote": case "strong": case "em": case "del":
+          if ("tokens" in token && token.tokens) visit(token.tokens);
+          break;
+        case "list":
+          for (const item of (token as Tokens.List).items) visit(item.tokens);
+          break;
+        case "table":
+          for (const cell of [...(token as Tokens.Table).header, ...(token as Tokens.Table).rows.flat()]) visit(cell.tokens);
+          break;
+      }
+    }
+  };
+  visit(new Marked({ extensions: reportSyntax }).lexer(markdown));
+  return [...ids];
 }
 
 /** Render from the recorded source map; never guess URLs or rewrite the report file. */
@@ -74,41 +105,7 @@ export function renderReport(markdown: string, sources: Source[]): string {
         return;
       } catch { return; }
     }
-    const direct = externalUrl(href);
-    if (direct) return direct;
-    // Resolve only known vault-note links; unknown relative links must not become
-    // requests against /<dashboard-token>/some-file (which would always 404).
-    const match = /^(?:\.\/)?(?:(?:research\/)?notes\/)?([^/#]+)\.md(?:#(.*))?$/.exec(href);
-    if (!match) return;
-    try {
-      const source = sourceMap.get(decodeURIComponent(match[1]));
-      const url = source && externalUrl(source.url);
-      if (!url) return;
-      const parsed = new URL(url);
-      if (match[2]) parsed.hash = match[2];
-      return parsed.href;
-    } catch { return; }
-  };
-  const mathInline: TokenizerExtension = {
-    name: "reportMathInline", level: "inline",
-    start: source => source.search(/\\[([]|\$/),
-    tokenizer(source) {
-      const match = mathAt(source);
-      if (match) return { type: "reportMathInline", ...match };
-    },
-  };
-  const mathBlock: TokenizerExtension = {
-    name: "reportMathBlock", level: "block",
-    start: source => { const match = /(?:^|\n) {0,3}(?:\\\[|\$\$)/.exec(source); return match ? match.index : undefined; },
-    tokenizer(source) {
-      const indent = /^ {0,3}/.exec(source)![0];
-      const match = mathAt(source.slice(indent.length));
-      if (!match?.display) return;
-      const tail = source.slice(indent.length + match.raw.length);
-      const ending = /^(?:[ \t]*(?:\n|$))/.exec(tail);
-      if (!ending) return;
-      return { type: "reportMathBlock", ...match, raw: indent + match.raw + ending[0] };
-    },
+    return resolveSourceLink(href, sourceMap, externalUrl);
   };
   const headings = new Map<string, number>();
   const parser = new Marked({
@@ -116,11 +113,7 @@ export function renderReport(markdown: string, sources: Source[]): string {
       { ...mathBlock, renderer: token => renderMath(token.raw, token.text, token.display) + "\n" },
       { ...mathInline, renderer: token => renderMath(token.raw, token.text, token.display) },
       {
-        name: "reportCitation", level: "inline", start: source => source.indexOf("[["),
-        tokenizer(source) {
-          const match = /^\[\[([^\]\n|#]+)(?:#([^\]\n|]+))?(?:\|([^\]\n]+))?\]\]/.exec(source);
-          if (match) return { type: "reportCitation", raw: match[0], id: match[1].trim(), fragment: match[2], label: match[3] };
-        },
+        ...citationTokenizer,
         renderer(token) {
           const source = sourceMap.get(token.id);
           const href = source && externalUrl(source.url);

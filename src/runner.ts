@@ -1,37 +1,39 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { Type } from "typebox";
-import type { Backend } from "./backend.ts";
+import type { Backend } from "./services.ts";
+import { recoveryForChecks, requireResearchConfig, resumeRecovery, structuralRecoveryReason } from "./recovery.ts";
+import { searchProviderSchema } from "./search.ts";
 import { readContextPage, readContextSnapshot, validateContext } from "./context.ts";
 import { queryScopedReader, readRetrievedPage, readRetrievedSnapshot } from "./capabilities.ts";
 import { contentHash } from "./context.ts";
 import type { ContextInputs } from "./context-types.ts";
-import { adequateExtraction, pageSpanSchema } from "./evidence.ts";
+import { adequateExtraction } from "./evidence.ts";
 import { ReadCoverage } from "./coverage.ts";
 import { queueFeedback } from "./feedback.ts";
+import { parseSuggestedBy, suggestedByDescription } from "./source-id.ts";
+import { assertRevisionSpendingApproval, type RevisionSpendingRecord } from "./revision-approval.ts";
 import { applyPatch, citationIds } from "./patch.ts";
-import { RunStore, materializeBackend } from "./store.ts";
+import { RunStore } from "./store.ts";
 import { createLocation, privateDirectory } from "./paths.ts";
 import { discoveryBatchSchema, discoveryKindSchema } from "./discovery-types.ts";
 import type { WorkerDriver, WorkerTool } from "./worker.ts";
 import {
-  checkSchema, configSchema, decompositionSchema, draftSchema, message, now,
-  feedbackTextSchema, revisionSchema, patchSchema, researchSchema, sourceSchema, stepIds, stepNames,
-  type Config, type Role, type RunState, type StepId, type Worker,
+  configSchema, decompositionSchema, draftSchema, message, now,
+  feedbackTextSchema, revisionSchema, patchSchema, researchSchema, sourceSchema, sourcePageSchema, stages, stepIds, stepNames, requireLightRun,
+  type Config, type Recovery, type Role, type RunState, type StepId, type Worker,
 } from "./types.ts";
 
-const sourcePageSchema = sourceSchema.omit({ fullRead: true }).extend({
-  offset: z.number().int(), end: z.number().int(), total: z.number().int(), hash: z.string(),
-  body: z.string(), nextOffset: z.number().int().nullable(),
-  pageSpans: z.array(pageSpanSchema).max(20).optional(),
-});
-class Blocked extends Error {}
+class Blocked extends Error {
+  constructor(reason: string, readonly recovery: Recovery = "change-config") { super(reason); }
+}
 
 export class ResearchRunner {
   readonly abortController = new AbortController();
   private stopReason?: "paused" | "aborted";
   private budgetExceeded = false;
   private lastTick = Date.now();
+  private lastProgressSave = 0;
   private heartbeat?: NodeJS.Timeout;
   private attempts = 0;
   private discoveryPending = 0;
@@ -44,6 +46,8 @@ export class ResearchRunner {
     backend: Backend, driver: WorkerDriver, onChange?: (state: RunState) => void,
     seed?: { revision: RunState["revision"]; feedback: string },
     location = createLocation(cwd), inputs?: ContextInputs): Promise<ResearchRunner> {
+    config = configSchema.parse(config);
+    requireResearchConfig(config);
     if (!inputs && (config.contextFiles.length || config.additionalInstructions || config.capabilities.length)) throw new Error("Selected context requires explicit disclosure approval");
     if (inputs) {
       if (inputs.projectPath !== location.projectPath) throw new Error("Context belongs to another originating project");
@@ -53,12 +57,12 @@ export class ResearchRunner {
     if (seed) { revisionSchema.parse(seed.revision); feedbackTextSchema.parse(seed.feedback); }
     if (!query.trim() || query.length > 30_000) throw new Error("Research query must contain 1–30,000 characters");
     privateDirectory(location.workspacePath);
-    const profile = z.object({ sourceMin: z.number().int().min(1).max(30), wordTarget: z.tuple([z.number(), z.number()]) }).parse(await backend.call("init"));
+    const profile = await backend.initialize();
     if (config.sourceTarget < profile.sourceMin) throw new Error(`sourceTarget must be at least ${profile.sourceMin}`);
     const slug = query.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).replace(/-$/, "") || "research";
     const tag = `${slug}-${randomBytes(4).toString("hex")}`;
     const state: RunState = {
-      version: 1, tag, query, profile: "light", status: "paused", createdAt: now(), updatedAt: now(),
+      version: 1, tag, query, profile: config.scope, status: "paused", createdAt: now(), updatedAt: now(),
       elapsedMs: 0, config: configSchema.parse(config), model, thinking, ...profile,
       steps: Object.fromEntries(stepIds.map(id => [id, "pending"])), workers: [], sources: [], failures: [],
       cost: 0, tokens: 0, pricingKnown: false, research: [], patches: {}, checks: [], feedback: [],
@@ -67,18 +71,22 @@ export class ResearchRunner {
     };
     if (seed) queueFeedback(state, seed.feedback);
     state.pricingKnown = await driver.checkModels(state);
-    await backend.call("create_run", { tag, query });
     const runner = new ResearchRunner(cwd, state, backend, driver, onChange);
     runner.save(); return runner;
   }
   static async revise(cwd: string, parent: RunState, feedback: string, config: Config,
     model: string, thinking: RunState["thinking"], backend: Backend, driver: WorkerDriver,
-    onChange?: (state: RunState) => void, inputs?: ContextInputs): Promise<ResearchRunner> {
+    onChange?: (state: RunState) => void, inputs?: ContextInputs, spendingApproval?: RevisionSpendingRecord): Promise<ResearchRunner> {
+    requireLightRun(parent);
+    if (spendingApproval) {
+      assertRevisionSpendingApproval(parent, spendingApproval);
+      if (config.budgetUsd !== spendingApproval.budgetUsd) throw new Error("Follow-up budget differs from the approved ceiling.");
+    }
     if ((parent.inputs || parent.disclosure) && !inputs) throw new Error("Revision of private/contextual research requires explicit snapshot reapproval");
     if (parent.inputs && inputs?.grant.id === parent.inputs.grant.id) throw new Error("A revision requires its own new context approval, not the parent's grant");
     if (parent.status !== "done" || !parent.report) throw new Error("Only completed reports can be revised. Pause and steer an unfinished run instead.");
     const revision = revisionSchema.parse({
-      parentTag: parent.tag, report: parent.report, sourceIds: parent.sources.map(s => s.id),
+      parentTag: parent.tag, report: parent.report, sourceIds: parent.sources.map(s => s.id), spendingApproval,
       instructions: [...(parent.revision?.instructions ?? []), ...parent.feedback.filter(f => f.status === "applied").map(f => f.text)],
     });
     for (const ref of parent.retrieved ?? []) {
@@ -130,46 +138,58 @@ export class ResearchRunner {
     this.state.patches = {}; this.state.checks = [];
     this.state.reportStale = !!this.state.report;
     this.activity("Steering applied; replanning research"); this.save();
-    await this.backend.call("set_status", { tag: this.state.tag, status: "running" }, this.abortController.signal);
-    for (const step of stepIds) await this.backend.call("set_step", { tag: this.state.tag, step, status: "pending" }, this.abortController.signal);
   }
   stop(reason: "paused" | "aborted"): void {
     this.stopReason = reason;
     this.abortController.abort();
   }
+  private saveProgress(): void {
+    // Cosmetic events can arrive many times per turn. Usage, evidence, approvals
+    // and stage transitions still call save() synchronously; heartbeat flushes quiet tails.
+    if (Date.now() - this.lastProgressSave >= 2000) this.save();
+  }
   private save(): void {
     const timestamp = Date.now();
+    this.lastProgressSave = timestamp;
     if (this.state.status === "running") this.state.elapsedMs += Math.max(0, timestamp - this.lastTick);
     this.lastTick = timestamp;
     this.store.save(this.state);
-    materializeBackend(this.state);
     this.onChange(this.state);
   }
   async run(): Promise<void> {
+    requireLightRun(this.state); // Refuse legacy execution before any write or model/backend work.
     if (this.state.status === "done" || this.state.status === "aborted") throw new Error(`Cannot resume a ${this.state.status} run`);
     this.lastTick = Date.now();
     try {
       this.state.config = configSchema.parse(this.state.config);
+      try { requireResearchConfig(this.state.config); }
+      catch (error) { throw new Blocked(message(error), "change-config"); }
       this.validateInputs();
       for (const source of this.state.sources) if (!adequateExtraction(source.extraction, this.state.config.readingRequirements)) source.fullRead = false;
       this.state.pricingKnown = await this.driver.checkModels(this.state);
-      if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached. Raise budgetUsd in .pi/hyperresearch.json, then explicitly resume with --use-project-config.");
+      if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached. Resume to approve a top-up, or use resume --add-budget <USD>. Spend and required reviews are preserved.");
       for (const call of this.state.integrationCalls ?? []) if (call.status === "running") call.status = "interrupted";
       for (const worker of this.state.workers) if (worker.status === "running") { worker.status = "interrupted"; worker.endedAt = now(); }
       for (const step of stepIds) if (this.state.steps[step] === "running") this.state.steps[step] = "pending";
-      // A verification retry gets a bounded correction pass, not a new draft.
-      if (this.state.status === "blocked" && this.state.checks.some(c => !c.ok) && this.state.report) {
-        this.state.steps["15"] = "pending"; this.state.steps["16"] = "pending";
+      // Metadata outages retry metadata, never paid editors. Explicit steering
+      // supersedes the old blocker and replans normally at the next boundary.
+      const recovery = resumeRecovery(this.state);
+      if (recovery) {
+        if (recovery === "new-run") throw new Blocked(structuralRecoveryReason, recovery);
+        if (recovery === "collect-evidence") {
+          for (const stage of [stages.research, stages.draft, stages.polish, stages.readability]) this.state.steps[stage] = "pending";
+          this.state.reportStale = !!this.state.report;
+        } else if (recovery === "edit-report") {
+          this.state.steps[stages.polish] = "pending";
+          this.state.steps[stages.readability] = "pending";
+        }
       }
-      this.state.status = "running"; this.state.reason = undefined;
+      this.state.status = "running"; this.state.reason = undefined; this.state.recovery = undefined;
       this.save();
-      await this.backend.call("set_status", { tag: this.state.tag, status: "running" }, this.abortController.signal);
       this.heartbeat = setInterval(() => {
         try { this.save(); } catch (error) { this.state.reason = message(error); this.abortController.abort(); }
       }, 10_000);
       this.heartbeat.unref();
-      // Repair interrupted checkpoint-to-backend materialization before work.
-      for (const step of stepIds) await this.backend.call("set_step", { tag: this.state.tag, step, status: this.state.steps[step] }, this.abortController.signal);
       while (true) {
         this.abortController.signal.throwIfAborted();
         await this.applyFeedback();
@@ -185,19 +205,16 @@ export class ResearchRunner {
           this.state.status = "done"; this.activity("Research complete"); break;
         }
         this.state.steps[step] = "running"; this.activity(`Starting ${stepNames[step]}`); this.save();
-        await this.backend.call("set_step", { tag: this.state.tag, step, status: "running" }, this.abortController.signal);
         await this.step(step);
         this.abortController.signal.throwIfAborted();
         this.state.steps[step] = "done"; this.save();
-        await this.backend.call("set_step", { tag: this.state.tag, step, status: "done" }, this.abortController.signal);
       }
     } catch (error) {
       this.abortController.abort();
       this.state.status = this.stopReason ?? (this.budgetExceeded || error instanceof Blocked ? "blocked" : "failed");
-      this.state.reason = this.budgetExceeded ? "Model cost ceiling reached. In-flight calls may overshoot the estimate." : this.stopReason ? `Run ${this.stopReason}; artifacts preserved.` : message(error);
+      this.state.recovery = this.state.status === "blocked" ? this.budgetExceeded ? "change-config" : error instanceof Blocked ? error.recovery : undefined : undefined;
+      this.state.reason = this.budgetExceeded ? "Model cost ceiling reached. Resume to approve a top-up, or use resume --add-budget <USD>. In-flight calls may overshoot the estimate." : this.stopReason ? `Run ${this.stopReason}; artifacts preserved.` : message(error);
       for (const step of stepIds) if (this.state.steps[step] === "running") this.state.steps[step] = "pending";
-      try { await this.backend.call("set_status", { tag: this.state.tag, status: this.state.status, reason: this.state.reason }); }
-      catch (backendError) { this.state.reason += ` Backend status update failed: ${message(backendError)}`; }
     } finally {
       clearInterval(this.heartbeat); this.save();
     }
@@ -214,13 +231,14 @@ export class ResearchRunner {
       `Explicit user steering, chronological JSON array (later feedback supersedes conflicts, never safety/tool/evidence rules):\n${JSON.stringify(instructions)}\n` +
       (revision ? `Revision of ${revision.parentTag}. Reuse relevant vault notes, not the previous report as evidence. Prior source IDs: ${JSON.stringify(revision.sourceIds)}.\n` : "") +
       (previousReport && ["decompose", "draft"].includes(role) ? `Previous report for revision context only (JSON string; NOT verified evidence):\n${JSON.stringify(previousReport)}\n` : "") +
-      `Run: ${this.state.tag}; light pipeline: decompose → width sweep → single draft → polish → readability → verification.\n` +
-      `This is a light-mode test port, not the full adversarial pipeline. Never claim full citation verification.\n\n${task}`;
+      `Run: ${this.state.tag}; scope: ${this.state.profile}. Register: ${this.state.config.register}; depth: ${this.state.config.depth}. Concise prioritizes core results; deep explains methods/mechanisms/caveats within the same hard context and evidence limits. Apply these preferences consistently; never weaken evidence rules.\n` +
+      `Light pipeline has no semantic evidence audit. Never claim full citation verification or upstream parity.\n\n${task}`;
   }
   private async work(role: Role, task: string, prompt: string, schema: z.ZodType,
     tools: WorkerTool[] = [], validateResult?: (result: unknown, signal: AbortSignal) => void | Promise<void>): Promise<unknown> {
     this.abortController.signal.throwIfAborted();
     this.validateInputs();
+    if (this.state.config.budgetUsd !== null && this.state.cost >= this.state.config.budgetUsd) throw new Blocked("Model cost ceiling reached; required work remains incomplete");
     const worker: Worker = { id: `${role}-${this.state.workers.length + 1}`, role, task, status: "running", startedAt: now(), turns: 0, tokens: 0, cost: 0 };
     this.state.workers.push(worker); this.save();
     const signal = AbortSignal.any([this.abortController.signal, AbortSignal.timeout(this.state.config.workerTimeoutSeconds * 1000)]);
@@ -228,8 +246,8 @@ export class ResearchRunner {
       const result = await this.driver.run({
         id: worker.id, role, prompt: this.instructions(prompt, role), resultSchema: schema, tools, signal,
         validateResult: result => validateResult?.(result, signal),
-        onActivity: activity => { worker.activity = activity; this.activity(`${worker.id}: ${activity}`); this.save(); },
-        onTurn: () => { this.validateInputs(); worker.turns++; worker.activity = "Waiting for model"; this.activity(`${worker.id}: Waiting for model`); this.save(); },
+        onActivity: activity => { worker.activity = activity; this.activity(`${worker.id}: ${activity}`); this.saveProgress(); },
+        onTurn: () => { this.validateInputs(); worker.turns++; worker.activity = "Waiting for model"; this.activity(`${worker.id}: Waiting for model`); this.saveProgress(); },
         onUsage: (tokens, cost) => {
           if (!Number.isFinite(tokens) || tokens < 0 || !Number.isFinite(cost) || cost < 0) throw new Error("Invalid model usage");
           worker.tokens += tokens; worker.cost += cost; this.state.tokens += tokens; this.state.cost += cost;
@@ -255,10 +273,12 @@ export class ResearchRunner {
       if (local) { this.useInputs(); if (!this.state.inputs || !this.state.location) throw new Error("No context approved"); }
       const retrieved = this.state.retrieved?.find(ref => ref.id === id);
       const page = sourcePageSchema.parse(retrieved ? readRetrievedPage(this.state.location!.workspacePath, this.state.inputs!.bindings!.find(binding => binding.id === retrieved.bindingId)!, retrieved, offset)
-        : local ? readContextPage(this.state.location!.workspacePath, this.state.inputs!, id, offset) : await this.backend.call("read_source", { tag: this.state.tag, id, offset }, signal));
+        : local ? readContextPage(this.state.location!.workspacePath, this.state.inputs!, id, offset) : await this.backend.readSource({ id, offset }, signal));
       if (page.purpose === "background") return page; // Never enters citation/source-count coverage.
-      const fullyRead = coverage.add(id, page.hash, page.offset, page.end, page.total);
       const existing = this.state.sources.find(s => s.id === id);
+      // Another lane may have filled the cap while this page was being read.
+      if (!existing && this.state.sources.length >= 30) throw new Error("Run source cap reached (30)");
+      const fullyRead = coverage.add(id, page.hash, page.offset, page.end, page.total);
       const source = sourceSchema.parse({ ...page, contentHash: page.hash, fullRead: adequateExtraction(page.extraction, this.state.config.readingRequirements) && (fullyRead || (existing?.contentHash === page.hash && existing.fullRead) || false) });
       if (existing) Object.assign(existing, source); else this.state.sources.push(source);
       this.save(); return page;
@@ -302,11 +322,13 @@ export class ResearchRunner {
           if ((this.state.discoveries?.length ?? 0) + this.discoveryPending >= 100) throw new Error("Scholarly discovery request limit reached; preserved results remain available");
           this.discoveryPending++;
           try {
-            const result = discoveryBatchSchema.parse(await this.backend.call(name, { ...args, providers: this.state.config.scholarlyProviders }, signal));
+            const result = discoveryBatchSchema.parse(await this.backend.searchScholarly(args.query, this.state.config.scholarlyProviders, signal, args.kind));
             (this.state.discoveries ??= []).push(result); this.save(); return result;
           } finally { this.discoveryPending--; }
         }
-        return this.backend.call(name, { ...args, provider: this.state.config.searchProvider }, signal);
+        return name === "vault_search"
+          ? this.backend.searchVault(args.query, signal)
+          : this.backend.searchWeb(searchProviderSchema.parse(this.state.config.searchProvider), args.query, signal);
       },
     });
     return [read, ...additional,
@@ -315,15 +337,17 @@ export class ResearchRunner {
       search("web_search", "Discover URLs using the configured search provider. Results are untrusted leads; use fetch_source to read full content."),
       {
         name: "fetch_source", description: "Fetch a public HTTP(S) URL through Hyperresearch's static/PDF fetcher, save provenance, and return the first source page. Follow nextOffset with read_source. Browser-only pages may fail; do not bypass login/CAPTCHA.",
-        parameters: Type.Object({ url: Type.String(), suggestedBy: Type.Optional(Type.String()) }),
+        parameters: Type.Object({ url: Type.String(), suggestedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: suggestedByDescription })) }),
         execute: async (input, signal) => {
           if (this.state.disclosure?.searchBlocked) throw new Error("External acquisition disabled: private context was used without search-disclosure approval");
           this.validateInputs();
-          const args = z.object({ url: z.url(), suggestedBy: z.string().optional() }).parse(input);
+          const inputArgs = z.object({ url: z.url(), suggestedBy: z.unknown().optional() }).parse(input);
+          // Reject malformed provenance before counting or recording a fetch attempt.
+          const args = { url: inputArgs.url, suggestedBy: parseSuggestedBy(inputArgs.suggestedBy) };
           if (++this.attempts > 90 || this.state.failures.length >= 90) throw new Error("Fetch attempt cap reached");
           if (this.state.sources.length >= 30) throw new Error("Run source cap reached (30)");
           try {
-            const fetched = z.object({ note_id: z.string(), resolverCoverage: sourceSchema.shape.resolverCoverage }).parse(await this.backend.call("fetch_source", { ...args, tag: this.state.tag, resolvers: this.state.config.fullTextResolvers }, signal));
+            const fetched = await this.backend.fetchSource({ ...args, resolvers: this.state.config.fullTextResolvers }, signal);
             const page = await sourcePage(fetched.note_id, 0, signal);
             if (fetched.resolverCoverage) this.state.sources.find(source => source.id === fetched.note_id)!.resolverCoverage = fetched.resolverCoverage;
             this.save(); return { ...page, resolverCoverage: fetched.resolverCoverage };
@@ -336,16 +360,16 @@ export class ResearchRunner {
     ];
   }
   private async step(step: StepId): Promise<void> {
-    if (step === "1") {
+    if (step === stages.decompose) {
       this.state.decomposition = decompositionSchema.parse(await this.work("decompose", stepNames[step],
         "Decompose this query into bounded research questions, required Markdown section headings, and a search plan. " +
         "Include primary-source, context, and adversarial searches. Respect the user's scope and requested voice; do not force a thesis. " +
-        "Plan for a short report, not a dissertation. Return title, questions, required_section_headings, and searches [{query,angle}].", decompositionSchema));
+        "Plan for a short report, not an unbounded dissertation. Return title, questions, required_section_headings, and searches [{query,angle}].", decompositionSchema));
       return;
     }
     const decomp = this.state.decomposition;
     if (!decomp) throw new Error("Missing decomposition checkpoint");
-    if (step === "2") {
+    if (step === stages.research) {
       const n = this.state.config.concurrency;
       const tasks = Array.from({ length: n }, (_, index) => {
         const searches = decomp.searches.filter((_, i) => i % n === index);
@@ -355,7 +379,7 @@ export class ResearchRunner {
           `Together the lanes target ${this.state.config.sourceTarget} distinct full-read sources; collect about ${Math.ceil(this.state.config.sourceTarget / n)} in this lane.\n` +
           `Existing run sources: ${JSON.stringify(this.state.sources.map(s => ({ id: s.id, title: s.title })))}.\n` +
           "Search the vault first, then scholarly discovery when relevant, then the web. Prefer primary sources. " +
-          "Fetch and read complete source bodies using pagination. Follow relevant citation chains with suggestedBy provenance. " +
+          "Fetch and read complete source bodies using pagination. For citation chains, suggestedBy must be the exact ID of the saved public source containing the link, not a URL or title. Omit it for search-discovered URLs without a saved source parent. " +
           "Do not treat an abstract, snippet, syndication or search result as a full paper or independent confirmation. " +
           "Disclose open-access substitutions and versions. Record disagreements, limitations, and missing evidence. " +
           "If a provider fails, use the other discovery tools; do not invent sources. Submit {summary,gaps} only when finished.", researchSchema, this.tools(coverage, true));
@@ -367,10 +391,10 @@ export class ResearchRunner {
       if (firstFailure) throw firstFailure;
       this.state.research = results.map(r => researchSchema.parse((r as PromiseFulfilledResult<unknown>).value));
       const read = this.state.sources.filter(s => s.fullRead).length;
-      if (read < this.state.sourceMin) throw new Blocked(`Only ${read} complete source reads; light profile requires ${this.state.sourceMin}. Resume to collect more evidence.`);
+      if (read < this.state.sourceMin) throw new Blocked(`Only ${read} complete source reads; light profile requires ${this.state.sourceMin}. Resume to collect more evidence.`, "collect-evidence");
       return;
     }
-    if (step === "10") {
+    if (step === stages.draft) {
       const coverage = new ReadCoverage();
       const validate = (input: unknown) => {
         const draft = draftSchema.parse(input);
@@ -396,9 +420,9 @@ export class ResearchRunner {
       const original = new Set(citationIds(report));
       for (const id of citationIds(changed)) if (!original.has(id)) throw new Error("Polish may not introduce new source citations");
     };
-    const role = step === "15" ? "polish" : "readability";
+    const role = step === stages.polish ? "polish" : "readability";
     const patch = await this.work(role, stepNames[step],
-      `${step === "15" ? "Remove filler, internal scaffolding, and unsupported rhetorical quotes; preserve substantive claims and citations." : "Audit readability: improve awkward sentences and repetition without changing meaning. Adopt only changes that clearly help this query."}\n` +
+      `${step === stages.polish ? "Remove filler, internal scaffolding, and unsupported rhetorical quotes; preserve substantive claims and citations." : "Audit readability: improve awkward sentences and repetition without changing meaning. Adopt only changes that clearly help this query."}\n` +
       `Previous gate findings, if any: ${JSON.stringify(this.state.checks)}.\n` +
       "You cannot rewrite the report. Submit {summary, edits:[{oldText,newText,reason}]}. " +
       "Each oldText must uniquely match the ORIGINAL report. Max 8 non-overlapping hunks, each side at most 800 characters, " +
@@ -413,22 +437,21 @@ export class ResearchRunner {
     const cited = citationIds(report);
     this.state.checks = [
       { name: "report-current", ok: !this.state.reportStale && !this.state.feedback.some(f => f.status === "queued"), detail: "Report must reflect the applied steering; no queued feedback at verification start" },
-      { name: "pipeline-complete", ok: stepIds.every(id => this.state.steps[id] === "done"), detail: "All five light-pipeline stages must complete" },
+      { name: "pipeline-complete", ok: stepIds.every(id => this.state.steps[id] === "done"), detail: `All ${stepIds.length} scheduled ${this.state.profile} stages must complete` },
       { name: "source-reads", ok: this.state.sources.filter(s => s.fullRead).length >= this.state.sourceMin, detail: `At least ${this.state.sourceMin} complete source reads` },
       { name: "known-citations", ok: cited.length >= Math.min(5, this.state.sourceMin) && cited.every(id => this.state.sources.some(s => s.id === id && s.fullRead)), detail: "Wiki citations must reference full-read source notes in this run" },
     ];
     this.save();
-    if (this.state.checks.some(c => !c.ok)) throw new Blocked("Pi verification failed; see the dashboard checks");
+    if (this.state.checks.some(c => !c.ok)) throw new Blocked("Pi verification failed; see the dashboard checks", recoveryForChecks(this.state.checks));
     try {
-      const result = z.object({ checked: z.number(), unresolved: z.number(), rate_limited: z.number(), retracted: z.array(z.string()) }).parse(
-        await this.backend.call("retractions", { tag: this.state.tag, providers: this.state.config.scholarlyProviders }, signal));
+      const result = await this.backend.refreshRetractions({ ids: this.state.sources.filter(source => !["local", "integration"].includes(source.origin ?? "")).map(source => source.id), providers: this.state.config.scholarlyProviders }, signal);
       if (result.rate_limited > 0) throw new Error(`Retraction sweep incomplete: ${result.rate_limited} notes rate-limited`);
       // Unresolved means the APIs answered but had no record, not 'not retracted'.
-      this.state.checks.push({ name: "retraction-refresh", ok: true, detail: `${result.checked} checked; ${result.unresolved} unresolved (unknown, not cleared); ${result.retracted.length} retracted. Backend DOI-bearing public notes only; ${this.state.sources.filter(source => ["local", "integration"].includes(source.origin ?? "")).length} local/scoped snapshots were not sent for metadata checks (status unknown, not cleared).` });
+      this.state.checks.push({ name: "retraction-refresh", ok: true, detail: `${result.checked} checked; ${result.unresolved} unresolved (unknown, not cleared); ${result.retracted.length} retracted. DOI-bearing public sources only; ${this.state.sources.filter(source => ["local", "integration"].includes(source.origin ?? "")).length} local/scoped snapshots were not sent for metadata checks (status unknown, not cleared).` });
     } catch (error) {
       signal.throwIfAborted();
       this.state.checks.push({ name: "retraction-refresh", ok: false, detail: message(error) });
-      throw new Blocked("Retraction refresh failed; cannot finish the run");
+      throw new Blocked("Retraction refresh failed; resume retries verification without paid editing stages.", "retry-verification");
     }
     this.validateInputs();
     const localEvidence = this.state.inputs && this.state.location ? this.state.sources.filter(source => ["local", "integration"].includes(source.origin ?? "") && source.fullRead).map(source => {
@@ -436,8 +459,9 @@ export class ResearchRunner {
       const snapshot = ref ? readRetrievedSnapshot(this.state.location!.workspacePath, ref) : readContextSnapshot(this.state.location!.workspacePath, this.state.inputs!, source.id);
       return { id: source.id, title: source.title, body: snapshot.body };
     }) : [];
-    const result = z.object({ passed: z.boolean(), checks: z.array(checkSchema) }).parse(await this.backend.call("finish", { tag: this.state.tag, localEvidence }, signal));
+    const result = await this.backend.verifyReport({ report, decomposition: this.state.decomposition, patches: this.state.patches,
+      sources: this.state.sources.filter(source => source.fullRead).map(source => ({ id: source.id, hash: source.contentHash ?? "" })), localEvidence }, signal);
     this.state.checks.push(...result.checks); this.save();
-    if (!result.passed) throw new Blocked("Backend verification failed. Resume for a bounded patch pass; structural problems require a new run.");
+    if (!result.passed) throw new Blocked("Report verification failed. See the checks for the required recovery; structural problems require explicit replanning or a new run.", recoveryForChecks(this.state.checks));
   }
 }

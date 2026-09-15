@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { configSchema, now, stateSchema, type Config, type RunState } from "./types.ts";
+import { configSchema, now, stateSchema, requireLightRun, type Config, type RunState } from "./types.ts";
 import { renderDashboard } from "./dashboard.ts";
 import { privateDirectory, safePath, validateId } from "./paths.ts";
 
@@ -49,26 +49,26 @@ export class RunStore {
     atomicWrite(path, report);
   }
   save(state: RunState): void {
+    requireLightRun(state);
     if (state.tag !== this.tag) throw new Error("Run tag does not match store");
     state.updatedAt = now();
     stateSchema.parse(state);
     safePath(this.root, "runs", this.tag);
     privateDirectory(this.dir);
-    // Authoritative checkpoint first. Remaining files are materialized views;
-    // resume rematerializes them after an interrupted save.
+    // One authoritative checkpoint. The report is the only maintained view;
+    // repair an interrupted/tampered copy without rewriting unchanged reports.
     atomicWrite(join(this.dir, "pi-state.json"), JSON.stringify(state, null, 2) + "\n");
-    if (state.decomposition) atomicWrite(join(this.dir, "prompt-decomposition.json"), JSON.stringify({
-      ...state.decomposition, pipeline_tier: "light", response_format: "short",
-    }, null, 2));
-    if (state.report !== undefined) atomicWrite(this.reportPath, state.report);
-    if (state.patches["15"]) atomicWrite(join(this.dir, "polish-log.json"), JSON.stringify(state.patches["15"], null, 2));
-    if (state.patches["16"]) atomicWrite(join(this.dir, "readability-decisions.json"), JSON.stringify(state.patches["16"], null, 2));
-    for (const [file, present] of [["prompt-decomposition.json", !!state.decomposition], ["polish-log.json", !!state.patches["15"]], ["readability-decisions.json", !!state.patches["16"]]] as const) {
-      const path = join(this.dir, file);
-      if (!present && existsSync(path)) {
-        if (lstatSync(path).isSymbolicLink()) throw new Error(`Refusing symlink: ${path}`);
-        unlinkSync(path);
-      }
+    if (state.report !== undefined) {
+      const path = safePath(this.root, "runs", this.tag, "report.md");
+      const stat = existsSync(path) ? lstatSync(path) : undefined;
+      if (stat && !stat.isFile()) throw new Error("Report view must be a regular file");
+      if (!stat || stat.size !== Buffer.byteLength(state.report) || readFileSync(path, "utf8") !== state.report) atomicWrite(path, state.report);
+    }
+    // Retire bridge-era views on writable runs only. Their authoritative data
+    // remains in the checkpoint; historical full/extended runs never reach here.
+    for (const file of ["prompt-decomposition.json", "polish-log.json", "readability-decisions.json"]) {
+      const path = safePath(this.root, "runs", this.tag, file);
+      if (existsSync(path)) unlinkSync(path);
     }
   }
   snapshot(): string {
@@ -77,24 +77,6 @@ export class RunStore {
     return path;
   }
 }
-/** Temporary Python adapter views; central checkpoint remains authoritative. */
-export function materializeBackend(state: RunState): void {
-  if (!state.location) return;
-  const root = state.location.workspacePath;
-  const run = safePath(root, "research", "runs", validateTag(state.tag));
-  const notes = safePath(root, "research", "notes");
-  privateDirectory(run); privateDirectory(notes);
-  if (state.report !== undefined) atomicWrite(join(notes, `final_report_${state.tag}.md`), state.report);
-  for (const [file, value] of [
-    ["prompt-decomposition.json", state.decomposition ? { ...state.decomposition, pipeline_tier: "light", response_format: "short" } : undefined],
-    ["polish-log.json", state.patches["15"]], ["readability-decisions.json", state.patches["16"]],
-  ] as const) {
-    const path = safePath(run, file);
-    if (value) atomicWrite(path, JSON.stringify(value, null, 2));
-    else if (existsSync(path)) unlinkSync(path);
-  }
-}
-
 export interface Inventory {
   runs: RunState[];
   issues: { tag: string; error: string }[];

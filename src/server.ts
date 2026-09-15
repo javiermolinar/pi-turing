@@ -1,4 +1,4 @@
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes } from "node:crypto";
 import type { Socket } from "node:net";
 import { dashboardCss, dashboardScript, renderDashboard, renderMain, renderShell } from "./dashboard.ts";
@@ -7,6 +7,27 @@ import { searchReports } from "./report-search.ts";
 import { validateId } from "./paths.ts";
 import type { RunState } from "./types.ts";
 import { exportAllowed, portableMarkdown } from "./export.ts";
+import { dashboardActionSchema, type DashboardControls } from "./dashboard-controls.ts";
+import { RevisionApprovalChangedError } from "./revision-approval.ts";
+
+async function actionBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []; let size = 0; let failed = false;
+    const fail = () => { failed = true; reject(new Error("Invalid action body")); };
+    req.setTimeout(10_000, () => { fail(); req.destroy(); });
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > 24_000) { fail(); return; }
+      if (!failed) chunks.push(chunk);
+    });
+    req.on("error", fail);
+    req.on("end", () => {
+      req.setTimeout(0);
+      if (failed) return;
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); } catch { fail(); }
+    });
+  });
+}
 
 export interface DashboardServer {
   url: string; publish(state: RunState, runnerLive?: boolean): void; close(): Promise<void>;
@@ -21,11 +42,15 @@ export async function startDashboard(initial: RunState, initialRunnerLive = true
   return startServer({ initial: structuredClone(initial), live: initialRunnerLive, persistedRoot: root });
 }
 /** Explicitly grants access to central inventory, or just the supplied run set. */
-export async function startInventory(root: string, allowedTags?: ReadonlySet<string>): Promise<DashboardServer> {
-  return startServer({ root, allowedTags: allowedTags ? new Set(allowedTags) : undefined });
+export async function startInventory(root: string, allowedTags?: ReadonlySet<string>, controls?: DashboardControls): Promise<DashboardServer> {
+  return startServer({ root, allowedTags: allowedTags ? new Set(allowedTags) : undefined }, controls);
 }
-async function startServer(scope: Scope): Promise<DashboardServer> {
+async function startServer(scope: Scope, controls?: DashboardControls): Promise<DashboardServer> {
   const token = randomBytes(24).toString("hex");
+  // Separate from the read URL; never included in snapshots, exports, or read-only shells.
+  const controlToken = controls ? randomBytes(32).toString("hex") : undefined;
+  const actions = new Map<string, { input: string; result: Promise<{ status: number; body: unknown }>; closeHandled?: boolean }>();
+  let actionBusy = false;
   const clients = new Set<Client>(); const sockets = new Set<Socket>();
   const liveRuns = new Map<string, boolean>();
   if ("initial" in scope) liveRuns.set(scope.initial.tag, scope.live);
@@ -39,10 +64,24 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
     if (!allowed(tag)) throw new Error("Not found");
     return "initial" in scope ? scope.persistedRoot ? new RunStore(scope.persistedRoot, tag).load() : scope.initial : new RunStore(scope.root, tag).load();
   };
+  // Share the bounded inventory scan across clients and refresh it on live changes.
+  let relatedCache: { at: number; data: ReturnType<typeof inventory> } | undefined;
+  const related = (state: RunState) => {
+    if ("initial" in scope) return { children: [] }; // Never expand a single-run capability.
+    if (!relatedCache || Date.now() - relatedCache.at >= 5000) {
+      relatedCache = { at: Date.now(), data: inventory(scope.root, scope.allowedTags) };
+    }
+    const data = relatedCache.data;
+    let parent: RunState | undefined;
+    if (state.revision && state.revision.parentTag !== state.tag && allowed(state.revision.parentTag)) {
+      try { parent = load(state.revision.parentTag); } catch { /* Missing/corrupt parent remains a plain reference. */ }
+    }
+    return { parent, children: data.runs.filter(run => run.tag !== state.tag && run.revision?.parentTag === state.tag), partial: data.partial || data.issues.length > 0 };
+  };
   const snapshot = (tag: string, line?: number) => {
     const state = load(tag);
     const lines = line ? state.report?.split("\n") : undefined;
-    return { tag, html: renderMain(state, liveRuns.get(tag) ?? false), at: state.updatedAt, hasReport: state.report !== undefined && exportAllowed(state),
+    return { tag, html: renderMain(state, liveRuns.get(tag) ?? false, related(state), controls?.feedback(state)), at: state.updatedAt, hasReport: state.report !== undefined && exportAllowed(state),
       ...(line && lines ? { location: { line, text: lines.slice(Math.max(0, line - 3), line + 2).join("\n") } } : {}) };
   };
   const send = (client: Client) => {
@@ -64,7 +103,8 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
   const server = createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer"); res.setHeader("X-Frame-Options", "DENY");
-    if (req.method !== "GET" || req.headers.host !== new URL(origin).host ||
+    const actionRoute = req.url === `/${token}/actions`;
+    if ((req.method !== "GET" && !(req.method === "POST" && actionRoute && controls)) || req.headers.host !== new URL(origin).host ||
       (req.headers.origin && req.headers.origin !== origin) || req.headers["sec-fetch-site"] === "cross-site") {
       res.writeHead(403).end("Forbidden"); return;
     }
@@ -76,11 +116,47 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
       const url = new URL(req.url, origin); const route = url.pathname;
       if (route === `/${token}/`) {
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.end(renderShell("initial" in scope ? scope.initial : undefined, true, "initial" in scope && scope.live)); return;
+        res.end(renderShell("initial" in scope ? scope.initial : undefined, true, "initial" in scope && scope.live, controlToken)); return;
       }
       if (route === `/${token}/style.css` || route === `/${token}/app.js`) {
         res.setHeader("Content-Type", route.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8");
         res.end(route.endsWith(".css") ? dashboardCss : dashboardScript); return;
+      }
+      if (route === `/${token}/controls` || route === `/${token}/actions`) {
+        if (!controls || req.headers["x-hyperresearch-control"] !== controlToken ||
+          (route.endsWith("/actions") && (req.method !== "POST" || req.headers.origin !== origin || req.headers["content-type"] !== "application/json"))) {
+          res.writeHead(403).end("Forbidden"); return;
+        }
+        if (route.endsWith("/controls")) { json(controls.session()); return; }
+        const parsed = dashboardActionSchema.safeParse(await actionBody(req));
+        if (!parsed.success) { res.statusCode = 400; json({ error: "Invalid action or missing spending authorization. Feedback must contain 1–4000 characters; refresh the dashboard before retrying." }); return; }
+        const action = parsed.data;
+        if (("tag" in action && !allowed(action.tag)) || (action.kind === "close" && action.activeTag && !allowed(action.activeTag))) {
+          res.statusCode = 404; json({ error: "Investigation unavailable." }); return;
+        }
+        const input = JSON.stringify(action);
+        let entry = actions.get(action.id);
+        if (entry && entry.input !== input) { res.statusCode = 409; json({ error: "Request ID already used for another action." }); return; }
+        if (!entry) {
+          if (actionBusy || actions.size >= 100) { res.statusCode = 409; json({ error: actionBusy ? "Another action is starting or awaiting private-context permission. Wait for it to finish first." : "Action limit reached. Close and reopen the dashboard in Pi." }); return; }
+          actionBusy = true;
+          entry = { input, result: Promise.resolve().then(() => controls.execute(action))
+            .then(body => ({ status: 200, body }))
+            .catch(error => ({ status: 409, body: { error: error instanceof RevisionApprovalChangedError ? error.message : "Action not completed. Check Pi for details, then refresh before trying again." } }))
+            .finally(() => { actionBusy = false; relatedCache = undefined; for (const client of clients) send(client); }) };
+          actions.set(action.id, entry);
+        }
+        const result = await entry.result;
+        const afterClose = () => {
+          if (action.kind !== "close" || entry!.closeHandled) return;
+          entry!.closeHandled = true;
+          void controls.afterClose().catch(() => {});
+        };
+        if (res.destroyed) { afterClose(); return; }
+        // A lost response must not leave the Pi close flow waiting forever. Cached retries
+        // acknowledge the same result without repeating cleanup on a reopened UI.
+        res.once("finish", afterClose); res.once("close", afterClose);
+        res.statusCode = result.status; json(result.body); return;
       }
       if (route === `/${token}/runs`) {
         const data = list(); json({ runs: data.runs.map(metadata), issues: data.issues.length, partial: !!data.partial,
@@ -142,7 +218,8 @@ async function startServer(scope: Scope): Promise<DashboardServer> {
       if (closed || !allowed(state.tag)) return;
       if ("initial" in scope) { scope.initial = structuredClone(state); scope.live = runnerLive; }
       liveRuns.set(state.tag, runnerLive);
-      for (const client of clients) if (client.tag === state.tag) send(client);
+      relatedCache = undefined;
+      for (const client of clients) send(client);
     },
     async close() {
       if (closed) return; closed = true; clearInterval(polling); clearInterval(heartbeat);

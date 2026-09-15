@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLocation, dataRoot, packageRoot, privateDirectory, requireLocation } from "../src/paths.ts";
@@ -38,7 +38,7 @@ test("central identity and inventory preserve saved context without materializin
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("relocated package resolves shared assets/backend independently of central state and cwd", async () => {
+test("relocated package loads central state and native backend without Python, uv, or PATH tools", async () => {
   const root = mkdtempSync(join(tmpdir(), "hpr-relocation-"));
   try {
     const pkg = join(root, "package"); privateDirectory(pkg);
@@ -47,10 +47,10 @@ test("relocated package resolves shared assets/backend independently of central 
     writeFileSync(join(pkg, "package.json"), '{"type":"module"}');
     symlinkSync(join(packageRoot, "node_modules"), join(pkg, "node_modules"));
     const state = fixture(); const data = join(root, "data"); new RunStore(data, state.tag).save(state);
-    const code = `import { RunStore } from ${JSON.stringify(pathToFileURL(join(pkg, "src/store.ts")).href)}; import { backendDir } from ${JSON.stringify(pathToFileURL(join(pkg, "src/backend.ts")).href)}; console.log(JSON.stringify({ tag: new RunStore(${JSON.stringify(data)}, ${JSON.stringify(state.tag)}).load().tag, backendDir }));`;
+    const code = `import { RunStore } from ${JSON.stringify(pathToFileURL(join(pkg, "src/store.ts")).href)}; import { NativeBackend } from ${JSON.stringify(pathToFileURL(join(pkg, "src/backend.ts")).href)}; process.env.PATH = ""; console.log(JSON.stringify({ tag: new RunStore(${JSON.stringify(data)}, ${JSON.stringify(state.tag)}).load().tag, profile: await new NativeBackend(${JSON.stringify(join(root, "workspace"))}).initialize() }));`;
     const result = await execute(process.execPath, ["--import", pathToFileURL(join(packageRoot, "node_modules/tsx/dist/loader.mjs")).href, "--input-type=module", "-e", code], { cwd: root });
     assert.equal(result.code, 0, result.stderr);
-    const loaded = JSON.parse(result.stdout); assert.equal(loaded.tag, state.tag); assert.equal(loaded.backendDir, join(realpathSync(pkg), "backend") + "/");
+    const loaded = JSON.parse(result.stdout); assert.equal(loaded.tag, state.tag); assert.equal(loaded.profile.sourceMin, 10);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

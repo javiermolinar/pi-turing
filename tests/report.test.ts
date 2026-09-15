@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseDocument } from "htmlparser2";
-import { renderReport } from "../src/report.ts";
+import { renderReport, reportSourceIds } from "../src/report.ts";
 import { fixture } from "./fixtures.ts";
 
 function elements(html: string, name: string): any[] {
@@ -11,7 +11,54 @@ function elements(html: string, name: string): any[] {
 }
 const render = (markdown: string) => renderReport(markdown, fixture().sources);
 
-test("wiki citations link to recorded source URLs, with aliases and fragments; missing citations stay explicit", () => {
+test("source counts deduplicate wiki, saved-note, direct, bare and reference links", () => {
+  const sources = fixture().sources;
+  const md = `[[sqlite-wal]] [[sqlite-wal#section|again]]
+
+[Note](research/notes/postgres-concurrency.md#isolation) [same](${sources[1].url})
+
+${sources[0].url}#details [reference][source]
+
+[source]: ${sources[0].url}
+
+[[unknown]] [unrecorded](https://example.org/other) [heading](#local)`;
+  assert.deepEqual(reportSourceIds(md, sources).sort(), sources.map(source => source.id).sort());
+  assert.deepEqual(reportSourceIds(`[only web](${sources[0].url})`, sources), [sources[0].id]);
+  assert.deepEqual(reportSourceIds('[encoded](./notes/sqlite%2Dwal.md)', sources), ['sqlite-wal']);
+  assert.deepEqual(reportSourceIds(`[wrong query](${sources[0].url}?different=1)`, sources), []);
+});
+
+test("source counts exclude code, escaped literals, math, HTML, images and unresolved links", () => {
+  const md = [
+    '`[[sqlite-wal]]`', '```md\n[[sqlite-wal]]\n```', String.raw`\[\[sqlite-wal\]\]`,
+    '$[[sqlite-wal]]$', String.raw`\(\text{[[sqlite-wal]]}\)`,
+    '<div>[[sqlite-wal]]</div>', '<a href="https://www.sqlite.org/wal.html">example</a>',
+    '![source illustration](https://www.sqlite.org/wal.html)',
+    '[missing](notes/missing.md) [[missing]]',
+  ].join('\n\n');
+  assert.deepEqual(reportSourceIds(md, fixture().sources), []);
+});
+
+test("source counts visit nested prose and preserve explicit identities for shared URLs", () => {
+  const sources = fixture().sources;
+  sources.push({ ...sources[0], id: 'another-version' });
+  assert.deepEqual(reportSourceIds(`[ambiguous](${sources[0].url})`, sources), []);
+  assert.deepEqual(reportSourceIds('[specific](notes/another-version.md)', sources), ['another-version']);
+  const md = `> **[[sqlite-wal]]**\n\n- *[[postgres-concurrency]]*\n\n| Evidence |\n| --- |\n| [[another-version]] |`;
+  assert.deepEqual(reportSourceIds(md, sources).sort(), sources.map(source => source.id).sort());
+});
+
+test("source counts include saved private citations but reject unusable public URLs", () => {
+  const sources = fixture().sources;
+  sources[0].url = 'file:///private/source'; sources[0].origin = 'local';
+  sources[1].url = 'javascript:alert(1)';
+  assert.deepEqual(reportSourceIds('[[sqlite-wal]] [[postgres-concurrency]]', sources), ['sqlite-wal']);
+  sources[0].origin = 'integration';
+  sources[0].integration = { bindingId: 'test-reader', bindingHash: 'fixture', uri: 'private://snapshot', visibility: 'private' };
+  assert.deepEqual(reportSourceIds('[[sqlite-wal]]', sources), ['sqlite-wal']);
+});
+
+test("wiki citations link to recorded source URLs, with aliases and fragments; missing citations stay explicit",  () => {
   const html = render('Claim [[sqlite-wal]] [[postgres-concurrency#isolation|details]] [[missing-source]].');
   const links = elements(html, "a");
   assert.equal(links.length, 2);

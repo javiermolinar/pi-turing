@@ -1,4 +1,24 @@
 import { configSchema, type RunState } from "../src/types.ts";
+import type { EvidenceBackend } from "../src/backend.ts";
+import { discoveryBatchSchema } from "../src/discovery-types.ts";
+
+export function discoveryFixture(query: string) {
+  return discoveryBatchSchema.parse({
+    query, retrievedAt: "2026-09-13T10:05:00.000Z",
+    results: [{ id: "fixture-paper", title: "Fixture paper: graph similarity", url: "https://example.org/paper", urls: [],
+      identifiers: [], authors: [], workType: "article", version: "published", retracted: false, correction: false,
+      fullTextCandidates: [], citationCounts: [], relations: [], provenance: [], evidence: "discovery-only" }],
+    coverage: [{ provider: "openalex", status: "ok", count: 1, skipped: 0, cached: false }], uncertainMatches: [],
+    limitation: "Discovery metadata and abstracts are untrusted leads, not full-read evidence or independent corroboration.",
+  });
+}
+
+export function forbiddenEvidence(onCall = () => {}): EvidenceBackend {
+  const forbidden = async (): Promise<never> => { onCall(); throw new Error("Discovery must not call evidence services"); };
+  return { initialize: forbidden, searchVault: forbidden, fetchSource: forbidden, readSource: forbidden,
+    refreshRetractions: forbidden, verifyReport: forbidden };
+}
+
 export function fixture(): RunState {
   return {
     version: 1, tag: "storage-comparison-demo", query: "Compare local SQLite and PostgreSQL for a small research vault.",

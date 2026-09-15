@@ -1,8 +1,10 @@
 node_modules/
+# Unused caches from pre-TypeScript checkouts.
 backend/.venv/
 __pycache__/
 *.pyc
 research/
 .hyperresearch/
+.pi-research/
 .hyperresearch-runner.lock/
 artifacts/

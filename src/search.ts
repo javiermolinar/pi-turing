@@ -1,16 +1,19 @@
 import { parseDocument, DomUtils } from "htmlparser2";
 import { z } from "zod";
-import { boundedBody } from "./http.ts";
+import { abortable, boundedBody } from "./http.ts";
+import { apiSearchProviders, type SearchEnvironment } from "./search-providers.ts";
 
-export const searchProviderSchema = z.enum(["brave", "duckduckgo"]);
+export const searchProviderSchema = z.enum(["brave", "duckduckgo", "tavily", "serply", "kagi"]);
 export type SearchProvider = z.infer<typeof searchProviderSchema>;
 export interface SearchResult { url: string; title: string; snippet: string }
-type SearchEnvironment = { BRAVE_SEARCH_API_KEY?: string };
 
 export function ensureSearchConfigured(provider: SearchProvider, env: SearchEnvironment = process.env): void {
   searchProviderSchema.parse(provider);
-  if (provider === "brave" && !env.BRAVE_SEARCH_API_KEY?.trim()) {
-    throw new Error("Brave Search requires BRAVE_SEARCH_API_KEY. Set it before launching Pi, or explicitly set searchProvider to duckduckgo in .pi/hyperresearch.json. No fallback will be used.");
+  if (provider === "duckduckgo") return;
+  const adapter = apiSearchProviders[provider];
+  const key = env[adapter.key]?.trim();
+  if (!key || /[^\x21-\x7e]/.test(key)) {
+    throw new Error(`${adapter.name} requires a valid ${adapter.key}. Set it before launching Pi, or explicitly select another searchProvider in .pi/hyperresearch.json. No fallback will be used.`);
   }
 }
 
@@ -70,16 +73,7 @@ export function parseDuckDuckGo(html: string): SearchResult[] {
   return results;
 }
 
-const braveResponse = z.object({
-  error: z.never().optional(), type: z.literal("search").optional(),
-  query: z.object({ original: z.string() }).optional(),
-  web: z.object({ results: z.array(z.object({
-    url: z.string(), title: z.string(), description: z.string().optional(),
-  })).optional() }).optional(),
-}).refine(data => data.web !== undefined || data.query !== undefined, "Missing search response fields");
-const textFromHtml = (html: string) => DomUtils.textContent(parseDocument(html));
-
-/** Fixed provider endpoints, no proxy, redirects, cookies, or automatic fallback. */
+/** Fixed provider endpoints, no redirects, cookies, or automatic fallback. */
 export async function webSearch(provider: SearchProvider, query: string, options: {
   signal?: AbortSignal; fetchImpl?: typeof fetch; env?: SearchEnvironment;
 } = {}): Promise<SearchResult[]> {
@@ -88,29 +82,35 @@ export async function webSearch(provider: SearchProvider, query: string, options
   z.string().min(1).max(500).parse(query);
   const signal = AbortSignal.any([AbortSignal.timeout(30_000), ...(options.signal ? [options.signal] : [])]);
   signal.throwIfAborted();
-  const url = new URL(provider === "brave" ? "https://api.search.brave.com/res/v1/web/search" : "https://html.duckduckgo.com/html/");
-  url.searchParams.set("q", query);
-  const headers: Record<string, string> = { Accept: provider === "brave" ? "application/json" : "text/html" };
-  if (provider === "brave") {
-    url.searchParams.set("count", "5");
-    headers["X-Subscription-Token"] = env.BRAVE_SEARCH_API_KEY!.trim();
-  }
+  const adapter = provider === "duckduckgo" ? undefined : apiSearchProviders[provider];
+  const { url, init }: { url: URL; init: RequestInit } = adapter
+    ? adapter.request(query, env[adapter.key]!.trim())
+    : { url: new URL(`https://html.duckduckgo.com/html/?${new URLSearchParams({ q: query })}`), init: { method: "GET" } };
+  const headers = new Headers(init.headers);
+  headers.set("Accept", adapter ? "application/json" : "text/html");
   let response: Response;
-  try { response = await (options.fetchImpl ?? fetch)(url, { headers, signal, redirect: "error", credentials: "omit" }); }
-  catch {
+  try {
+    const fetching = (options.fetchImpl ?? fetch)(url, { ...init, headers, signal, redirect: "error", credentials: "omit" });
+    void fetching.then(value => { if (signal.aborted) void value.body?.cancel().catch(() => {}); }, () => {});
+    response = await abortable(fetching, signal);
+  } catch {
     signal.throwIfAborted();
     throw new Error(`${provider} search request failed. No fallback attempted.`);
   }
   if (!response.ok) {
-    await response.body?.cancel();
+    void response.body?.cancel().catch(() => {});
     // Never echo provider bodies/headers: they may contain the API key.
     throw new Error(`${provider} search returned HTTP ${response.status}. No fallback attempted.`);
   }
-  const body = await boundedBody(response, 1_000_000, signal);
+  let body: string;
+  try { body = await boundedBody(response, 1_000_000, signal); }
+  catch (error) {
+    signal.throwIfAborted();
+    if (error instanceof Error && error.message === "Response exceeds 1MB limit") throw error;
+    throw new Error(`${provider} search response could not be read. No fallback attempted.`);
+  }
   signal.throwIfAborted();
-  if (provider === "duckduckgo") return parseDuckDuckGo(body);
-  let parsed: z.infer<typeof braveResponse>;
-  try { parsed = braveResponse.parse(JSON.parse(body)); }
-  catch { throw new Error("Brave Search returned malformed JSON/results"); }
-  return normalize((parsed.web?.results ?? []).map(item => ({ url: item.url, title: textFromHtml(item.title), snippet: textFromHtml(item.description ?? "") })));
+  if (!adapter) return parseDuckDuckGo(body);
+  try { return normalize(adapter.parse(JSON.parse(body))); }
+  catch { throw new Error(`${adapter.name} returned malformed JSON/results`); }
 }

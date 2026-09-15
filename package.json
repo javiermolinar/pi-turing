@@ -4,18 +4,66 @@
   "description": "Composable research for Pi with private runs, evidence tracking and portable reports",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package", "research"],
-  "engines": { "node": ">=22" },
-  "pi": { "extensions": ["./extensions/index.ts"], "skills": ["./skills"] },
-  "files": ["extensions", "src", "web", "skills", "backend/bridge.py", "backend/pyproject.toml", "backend/uv.lock", "README.md", "PLAN.md", "PARITY.md", "INTEGRATIONS.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+  "keywords": [
+    "pi-package",
+    "research"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "files": [
+    "extensions",
+    "src",
+    "web",
+    "skills",
+    "assets",
+    "README.md",
+    "INTEGRATIONS.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
     "migrate": "tsx scripts/migrate.ts",
     "typecheck": "tsc --noEmit",
-    "test:backend": "uv run --project backend --locked python -m unittest discover -s tests -p '*_test.py'",
-    "test:browser": "tsx scripts/preview.ts && tsx scripts/preview-inventory.ts"
+    "test:backend": "tsx --test tests/native-backend.test.ts tests/native-runner.test.ts tests/extraction.test.ts tests/public-http.test.ts",
+    "test:browser": "tsx scripts/preview.ts && tsx scripts/preview-inventory.ts && tsx scripts/preview-notebook.ts && tsx scripts/preview-controls.ts"
   },
-  "dependencies": { "katex": "^0.18.7", "htmlparser2": "^10.1.0", "marked": "^17.0.0", "sanitize-html": "^2.17.0", "proper-lockfile": "^4.1.2", "zod": "^4.3.6" },
-  "peerDependencies": { "@earendil-works/pi-tui": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-ai": "*", "typebox": "*" },
-  "devDependencies": { "@types/node": "^22.0.0", "@types/sanitize-html": "^2.16.0", "@types/proper-lockfile": "^4.1.4", "tsx": "^4.20.0", "typescript": "^5.9.0", "playwright": "^1.58.0" }
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "htmlparser2": "^10.1.0",
+    "ipaddr.js": "^2.5.0",
+    "katex": "^0.18.7",
+    "linkedom": "^0.18.13",
+    "marked": "^17.0.0",
+    "pdfjs-dist": "^6.3.289",
+    "proper-lockfile": "^4.1.2",
+    "sanitize-html": "^2.17.0",
+    "undici": "^7.29.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/sanitize-html": "^2.16.0",
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.58.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
 }

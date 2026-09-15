@@ -27,7 +27,7 @@ test("inventory and search filter every endpoint to the capability's authorized 
     }
     allowed.report = "Updated from another runner"; new RunStore(root, allowed.tag).save(allowed);
     const external = await (await fetch(new URL("run?id=allowed", single.url))).json();
-    assert.match(external.html, /Updated from another runner/); assert.match(external.html, /recorded running/);
+    assert.match(external.html, /Updated from another runner/); assert.match(external.html, /Recorded running; not live/);
     const exported = await fetch(new URL("markdown?id=allowed", server.url));
     assert.equal(exported.headers.get("content-disposition"), 'attachment; filename="allowed.md"');
     assert.match(await exported.text(), /UNVERIFIED DRAFT/);

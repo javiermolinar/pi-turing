@@ -3,10 +3,17 @@
 This port adapts the light-pipeline workflow and scholarly-provider field mappings from
 https://github.com/jordan-gibbs/hyperresearch at
 `75b1ecfb2891184fad2cc1a2ddf9abe476f5b54c` (0.11.1).
-The temporary Python backend is pinned to that commit. OpenAlex/Crossref field
-handling in `src/scholarly-providers.ts` adapts the upstream providers behind a
-new normalized TypeScript contract. Pi integration and dashboard are
-separate implementations; this is not a claim of upstream feature or benchmark parity.
+The TypeScript implementation also adapts the retained light structural gates,
+multilingual length/density rules, retraction-acknowledgment rule and open-access
+resolver mappings from that reference. OpenAlex/Crossref field handling in
+`src/scholarly-providers.ts` adapts the upstream providers behind a normalized
+TypeScript contract. The Python dependency has been removed. Pi integration and
+dashboard are separate implementations; this is not a claim of upstream feature
+or benchmark parity.
+
+Runtime libraries retain their own licenses in their distributed packages:
+Mozilla Readability (Apache-2.0), PDF.js (Apache-2.0), LinkeDOM (ISC), Undici (MIT),
+ipaddr.js (MIT), and YAML (ISC).
 
 MIT License
 

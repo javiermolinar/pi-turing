@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPatch, citationIds } from "../src/patch.ts";
@@ -45,6 +45,33 @@ test("checkpoint rematerializes report and refuses traversal and symlinks", () =
     symlinkSync(outside, join(cwd, "alias"));
     assert.throws(() => atomicWrite(join(cwd, "alias"), "bad"), /symlink/);
     assert.equal(readFileSync(outside, "utf8"), "safe");
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test("activity checkpoints leave unchanged reports alone and retire duplicate JSON views", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "hpr-store-views-"));
+  try {
+    const state = fixture(); state.report = "# Preserved report";
+    state.patches = { "15": { summary: "Polish", edits: [] }, "16": { summary: "Readable", edits: [] } };
+    const store = new RunStore(cwd, state.tag);
+    store.save(state);
+    const before = lstatSync(store.reportPath, { bigint: true });
+    const retired = ["prompt-decomposition.json", "polish-log.json", "readability-decisions.json"];
+    for (const file of retired) {
+      assert.equal(existsSync(join(store.dir, file)), false);
+      writeFileSync(join(store.dir, file), "stale bridge view");
+    }
+    state.activity = { text: "Reasoning", at: new Date().toISOString() };
+    store.save(state);
+    const after = lstatSync(store.reportPath, { bigint: true });
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.mtimeNs, before.mtimeNs);
+    for (const file of retired) assert.equal(existsSync(join(store.dir, file)), false);
+    assert.deepEqual(store.load().patches, state.patches);
+    assert.deepEqual(store.load().decomposition, state.decomposition);
+    state.report = "# Updated report";
+    store.save(state);
+    assert.equal(readFileSync(store.reportPath, "utf8"), state.report);
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 

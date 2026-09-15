@@ -9,7 +9,7 @@ export async function writerLocked(root: string): Promise<boolean> {
   return lockfile.check(root, { lockfilePath: join(root, ".writer.lock"), stale: 30_000 });
 }
 
-/** Conservative single writer per data root while the Python adapter is retained. */
+/** Conservative single writer per data root; evidence mutations stay serialized. */
 export async function lockDataRoot(root: string, onCompromised?: (error: Error) => void): Promise<() => Promise<void>> {
   privateDirectory(root);
   safePath(root, ".writer.lock");

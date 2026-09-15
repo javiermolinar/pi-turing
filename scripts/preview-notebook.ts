@@ -21,6 +21,37 @@ async function checkHeadingBaselines(page: Page) {
   assert.ok(Math.max(...baselines) - Math.min(...baselines) < .5, `All three section headings share a text baseline: ${baselines}`);
 }
 
+async function checkReadingColumn(page: Page) {
+  const geometry = await page.evaluate(() => {
+    const sheet = document.querySelector('.report-sheet')!;
+    const body = document.querySelector('.report')!;
+    const style = getComputedStyle(sheet);
+    const sheetBox = sheet.getBoundingClientRect();
+    const bodyBox = body.getBoundingClientRect();
+    // ch depends on the resolved font. Linux's serif fallback is narrower than
+    // macOS Charter, so a correct 68ch column can have larger centered gutters.
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;display:block;width:68ch;height:0;visibility:hidden';
+    body.append(probe);
+    const measure = probe.getBoundingClientRect().width;
+    probe.remove();
+    const leftInset = parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+    const rightInset = parseFloat(style.borderRightWidth) + parseFloat(style.paddingRight);
+    const available = sheetBox.width - leftInset - rightInset;
+    const expectedWidth = Math.min(available, measure);
+    return { sheetWidth: sheetBox.width, bodyWidth: bodyBox.width, expectedWidth,
+      leftInset, rightInset, left: bodyBox.x - sheetBox.x,
+      expectedLeft: leftInset + (available - expectedWidth) / 2,
+      headerLeft: document.querySelector('.report-sheet > .section-header')!.getBoundingClientRect().x - sheetBox.x };
+  });
+  const detail = JSON.stringify(geometry);
+  assert.ok(geometry.sheetWidth <= 800, `Wide monitors must not stretch the report sheet: ${detail}`);
+  assert.ok(geometry.leftInset <= 33 && geometry.rightInset <= 33, `Paper padding stays bounded: ${detail}`);
+  assert.ok(Math.abs(geometry.bodyWidth - geometry.expectedWidth) < 1, `Report fills available space up to its 68ch measure: ${detail}`);
+  assert.ok(Math.abs(geometry.left - geometry.expectedLeft) < 1, `Reading column is centered inside the paper padding: ${detail}`);
+  assert.ok(Math.abs(geometry.headerLeft - geometry.left) < 1, `Report header aligns with its reading column: ${detail}`);
+}
+
 async function checkSurfaces(page: Page) {
   const palette = await page.evaluate(() => {
     const root = getComputedStyle(document.documentElement);
@@ -198,26 +229,27 @@ try {
     await page.evaluate(() => window.scrollTo(0, 0));
     await checkHeadingBaselines(page);
     const layout = (await page.locator('.layout').boundingBox())!;
-    const sheet = (await report.boundingBox())!;
-    const body = (await page.locator('.report').boundingBox())!;
-    const heading = (await page.locator('.report-sheet > .section-header').boundingBox())!;
     assert.ok(layout.width < 1450, 'Wide monitors must not stretch the notebook');
     assert.ok(Math.abs(layout.x - (width - layout.x - layout.width)) < 1, 'The complete notebook is centered');
-    assert.ok(sheet.width <= 800 && body.x - sheet.x < 48, `No oversized blank margins inside the report sheet: ${JSON.stringify({ sheet, body })}`);
-    assert.ok(Math.abs(heading.x - body.x) < 1, 'Report header aligns with its reading column');
+    await checkReadingColumn(page);
     assert.ok((await revision.boundingBox())!.width >= 300, 'Revision requests have a comfortable column');
     const overview = (await page.locator('.run-overview').boundingBox())!;
     assert.ok(Math.abs(overview.x - layout.x) < 1 && Math.abs(overview.width - layout.width) < 1, 'Overview shares the notebook boundaries');
     const header = (await page.locator('.run-header').boundingBox())!;
     const metrics = (await page.locator('.metrics').boundingBox())!;
     assert.ok(Math.abs(header.x - metrics.x) < 1 && Math.abs(header.width - metrics.width) < 1, 'Title and metrics share the overview’s inner boundaries');
-    assert.ok(await page.locator('.report').evaluate(el => {
-      const measure = document.createElement('span'); measure.style.cssText = 'display:block;width:68ch'; el.append(measure);
-      const max = measure.getBoundingClientRect().width; measure.remove();
-      return el.getBoundingClientRect().width <= max + 1;
-    }), 'The reading measure remains bounded on wide screens');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   }
+  // Exercise the narrow fallback on macOS too; do not rely on CI's installed fonts.
+  const fallback = await page.addStyleTag({ content: ':root { --serif: "Times New Roman", "Liberation Serif", serif; }' });
+  try {
+    for (const width of [1920, 2560, 2828]) {
+      await page.setViewportSize({ width, height: 1521 });
+      await checkReadingColumn(page);
+      await checkHeadingBaselines(page);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    }
+  } finally { await fallback.evaluate(el => el.parentNode?.removeChild(el)); }
   assert.ok(await page.locator('.revision-request').isVisible());
   assert.equal(await page.locator('.revision .footnote:visible, .command:visible').count(), 0);
   await page.locator('[data-details-key="steering-history"] > summary').click();

@@ -20,8 +20,7 @@ Turing (`pi-turing`) is a research workspace for [Pi](https://pi.dev), inspired 
 A research toolkit that searches the web and scholarly literature, reads sources, and turns your question into a report with citations. It uses the model you select in Pi.
 
 
-
-- **Native TypeScript.** Runs directly in Pi on Node.js—no Python, uv, or separate backend setup.
+- **Native TypeScript.** Runs directly in Pi on Node.js.
 - **Choose your sources.** Web search through DuckDuckGo, Brave, Tavily, Serply, or Kagi, plus scholarly discovery through OpenAlex, Crossref, and opt-in specialist providers.
 - **Keep working.** Start research in the background without locking your Pi prompt.
 - **Follow the work.** See progress, sources, and estimated cost in a live dashboard.
@@ -103,21 +102,6 @@ Approve the cost confirmation and let it run. Research can take **30+ minutes**.
 - **Follow and steer:** open `/turing` to watch progress, inspect sources, and guide the investigation from the box beside the report.
 - **Go deeper:** ask a follow-up in the dashboard to start a new paid investigation linked to the original. The original report stays unchanged.
 - **Come back later:** run `/turing` in Pi to browse saved investigations and export reports as Markdown or offline HTML.
-
-## Compared with upstream
-
-We target [Hyperresearch](https://github.com/jordan-gibbs/hyperresearch)’s **light research workflow**, not full feature parity.
-
-- **Shared workflow:** planning, source research, one draft, polish, readability, and structural/quote checks.
-- **Adapted for Pi:** a native TypeScript runtime, background workers, a live dashboard, steering, and linked follow-ups with explicit spending and private-context permissions.
-- **Not included:** broader research tiers, knowledge-base management, browser automation, and OCR.
-
-From upstream’s 16-step pipeline, Pi adapts steps **1, 2, 10, 15, and 16**. The main gaps are:
-
-- **Steps 3–9:** contradiction analysis, targeted depth research, reconciliation of source disagreements, corpus critique, and evidence digests.
-- **Steps 10–11:** multiple drafts and synthesis; Pi currently produces one draft.
-- **Steps 12–14:** dedicated critic reviews, targeted gap-filling research, and critic-driven revision.
-
 ---
 
 [MIT License](LICENSE) · [Upstream attribution](THIRD_PARTY_NOTICES.md)

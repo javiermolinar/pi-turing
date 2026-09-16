@@ -16,15 +16,29 @@ import { ResearchRunner } from "../src/runner.ts";
 import { PiWorkerDriver } from "../src/worker.ts";
 
 export function harness(cwd: string, factory = extension) {
-  process.env.HYPERRESEARCH_DATA_ROOT = cwd;
+  process.env.TURING_DATA_ROOT = cwd;
   const commands = new Map<string, any>(); const tools = new Map<string, any>(); const events = new Map<string, any>(); const notices: string[] = []; const noticeLevels: string[] = [];
   const ctx: any = { cwd, mode: "rpc", hasUI: true, isProjectTrusted: () => true,
     ui: { select: async () => undefined, confirm: async () => false, input: async () => undefined, notify: (text: string, level: string) => { notices.push(text); noticeLevels.push(level); }, setWidget: () => {}, setEditorText: () => { throw new Error("Must not replace user input"); } } };
   const pi: any = { registerCommand: (name: string, spec: any) => commands.set(name, spec), on: (name: string, handler: any) => events.set(name, handler),
     registerTool: (spec: any) => tools.set(spec.name, spec), appendEntry: () => {}, sendUserMessage: () => { throw new Error("Must not start model turns"); } };
   factory(pi);
-  return { ctx, events, tools, notices, noticeLevels, completions: (prefix = "") => commands.get("hyperresearch").getArgumentCompletions(prefix), command: (input: string) => commands.get("hyperresearch").handler(input, ctx) };
+  return { ctx, events, tools, notices, noticeLevels, commands, completions: (prefix = "") => commands.get("turing").getArgumentCompletions(prefix), command: (input: string) => commands.get("turing").handler(input, ctx) };
 }
+
+test("Turing exposes its new tool and retains the old command as an alias", async () => {
+  const root = mkdtempSync(join(tmpdir(), "turing-command-")); const h = harness(root);
+  try {
+    assert.ok(h.commands.has("turing")); assert.ok(h.commands.has("hyperresearch"));
+    assert.ok(h.tools.has("turing_run")); assert.equal(h.tools.has("hyperresearch_run"), false);
+    await h.command("help");
+    const help = h.notices.at(-1)!;
+    assert.match(help, /Turing — research for the questions behind your code/);
+    assert.match(help, /\/turing <question>/); assert.doesNotMatch(help, /\/hyperresearch/);
+    await h.commands.get("hyperresearch").handler("help", h.ctx);
+    assert.equal(h.notices.at(-1), help);
+  } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("legacy setup command is a no-op and no longer requests an install", async () => {
   const root = mkdtempSync(join(tmpdir(), "hpr-native-setup-")); const h = harness(root);
@@ -34,11 +48,11 @@ test("legacy setup command is a no-op and no longer requests an install", async 
     assert.match(h.notices.at(-1)!, /No setup needed/);
     assert.equal(existsSync(join(root, "workspaces")), false);
     assert.equal(existsSync(join(root, "backend")), false);
-    assert.ok(!h.tools.get("hyperresearch_run").description.includes("Requires /hyperresearch setup"));
+    assert.ok(!h.tools.get("turing_run").description.includes("Requires /turing setup"));
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("startup and ordinary chat never load saved investigations or show Hyperresearch UI", async t => {
+test("startup and ordinary chat never load saved investigations or show Turing UI", async t => {
   const root = mkdtempSync(join(tmpdir(), "hpr-quiet-start-")); const h = harness(root);
   try {
     const state = fixture(); state.location = createLocation(root, root);
@@ -54,7 +68,7 @@ test("startup and ordinary chat never load saved investigations or show Hyperres
       }
     }
     assert.equal(loads, 0); assert.equal(widgets, 0); assert.deepEqual(h.notices, []);
-    assert.ok(h.tools.has("hyperresearch_run"), "Explicit research remains available");
+    assert.ok(h.tools.has("turing_run"), "Explicit research remains available");
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
 });
 test("explicit status selects a saved run, but session replacement does not restore it", async () => {
@@ -104,7 +118,7 @@ for (const scope of ["full", "extended"] as const) test(`${scope} configuration 
     writeFileSync(join(root, ".pi", "hyperresearch.json"), JSON.stringify({ scope }));
     h.ctx.ui.confirm = async () => { throw new Error("No approval should be requested"); };
     await h.command("start A new question"); assert.match(h.notices.at(-1)!, /removed/);
-    await assert.rejects(h.tools.get("hyperresearch_run").execute("fixture", { query: "A new question" }, new AbortController().signal, undefined, h.ctx), /removed/);
+    await assert.rejects(h.tools.get("turing_run").execute("fixture", { query: "A new question" }, new AbortController().signal, undefined, h.ctx), /removed/);
     assert.equal(existsSync(join(root, "workspaces")), false);
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
 });
@@ -152,7 +166,7 @@ test("tool cancellation dismisses startup approval and never starts workers", as
       ready();
       return new Promise<boolean>(resolve => options.signal.addEventListener("abort", () => resolve(false), { once: true }));
     };
-    const task = h.tools.get("hyperresearch_run").execute("fixture", { query: "Cancelled question" }, abort.signal, undefined, h.ctx);
+    const task = h.tools.get("turing_run").execute("fixture", { query: "Cancelled question" }, abort.signal, undefined, h.ctx);
     await prompted;
     abort.abort();
     await assert.rejects(task);
@@ -170,7 +184,7 @@ test("a fast tool completion returns its own run even after the controller becom
     h.ctx.ui.confirm = async () => true;
     t.mock.method(PiWorkerDriver, "create", async () => ({ checkModels: async () => true }) as any);
     t.mock.method(ResearchRunner.prototype, "run", async function(this: ResearchRunner) { this.state.status = "done"; });
-    const result = await h.tools.get("hyperresearch_run").execute("fixture", { query: "Fast fixture" }, new AbortController().signal, undefined, h.ctx);
+    const result = await h.tools.get("turing_run").execute("fixture", { query: "Fast fixture" }, new AbortController().signal, undefined, h.ctx);
     assert.match(result.content[0].text, /completed its required gates/);
     assert.match(result.details.tag, /^fast-fixture-/);
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
@@ -193,7 +207,7 @@ test("configured context remains a proposal with separate disclosures, not autom
     assert.deepEqual(confirmations, ["Approve context for research models?", "Allow context in public search/acquisition requests?", "Allow exporting reports derived from this context?", "Start research?"]);
     assert.equal(existsSync(join(root, "workspaces")), false);
     confirmations.length = 0; h.ctx.hasUI = false; // Explicit context still requires interactive permission.
-    await assert.rejects(h.tools.get("hyperresearch_run").execute("fixture", { query: "Noninteractive context must not auto-approve" }, new AbortController().signal, undefined, h.ctx), /interactive disclosure approval/);
+    await assert.rejects(h.tools.get("turing_run").execute("fixture", { query: "Noninteractive context must not auto-approve" }, new AbortController().signal, undefined, h.ctx), /interactive disclosure approval/);
     assert.equal(existsSync(join(root, "workspaces")), false);
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
 });
@@ -454,8 +468,8 @@ test("bare command opens the dashboard; primary help and completions expose only
     assert.deepEqual(h.completions().map((item: any) => item.value), ["close", "help"]);
     await h.command("help");
     assert.match(h.notices.at(-1)!, /Open the dashboard/);
-    assert.doesNotMatch(h.notices.at(-1)!, /\/hyperresearch (migrate|context|snapshot|steer)/);
-    await h.command("help advanced"); assert.match(h.notices.at(-1)!, /\/hyperresearch migrate/);
+    assert.doesNotMatch(h.notices.at(-1)!, /\/turing (migrate|context|snapshot|steer)/);
+    await h.command("help advanced"); assert.match(h.notices.at(-1)!, /\/turing migrate/);
     const url = (await openedDashboard(h)).url;
     await h.command("close");
     assert.equal(h.events.get("before_agent_start")({ systemPrompt: "base" }, h.ctx), undefined);
@@ -776,7 +790,7 @@ for (const approve of [false, true]) test(`completed steering offers a revision 
     await h.command(`steer ${feedback}`);
     await h.events.get("session_shutdown")({}, h.ctx);
     assert.deepEqual(prompts, ["Create revision?"]);
-    assert.ok(h.notices.some(n => n.includes(`/hyperresearch revise ${state.tag} ${feedback}`)));
+    assert.ok(h.notices.some(n => n.includes(`/turing revise ${state.tag} ${feedback}`)));
     assert.deepEqual(readFileSync(join(store.dir, "pi-state.json")), before);
     assert.equal(children.length, approve ? 1 : 0);
     if (approve) {
@@ -827,7 +841,7 @@ test("non-interactive completed steering only prints the exact revision command"
     await h.command(`status ${state.tag}`);
     const before = readFileSync(join(store.dir, "pi-state.json"));
     await h.command("steer Compare alternatives");
-    assert.match(output.at(-1)!, new RegExp(`/hyperresearch revise ${state.tag} Compare alternatives`));
+    assert.match(output.at(-1)!, new RegExp(`/turing revise ${state.tag} Compare alternatives`));
     assert.deepEqual(readFileSync(join(store.dir, "pi-state.json")), before);
   } finally { await h.events.get("session_shutdown")({}, h.ctx); rmSync(root, { recursive: true, force: true }); }
 });

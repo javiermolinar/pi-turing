@@ -47,7 +47,7 @@ export function createPublicRequest(dispatcherFactory: () => Dispatcher = () => 
     for (let hop = 0; hop <= 5; hop++) {
       signal.throwIfAborted();
       const response = await request(url, { dispatcher, signal, redirect: "manual", credentials: "omit",
-        headers: { "User-Agent": "pi-hyperresearch/0.1", Accept: "text/html, application/pdf, text/plain, application/xml;q=0.8", ...options.headers } });
+        headers: { "User-Agent": "pi-turing/0.2", Accept: "text/html, application/pdf, text/plain, application/xml;q=0.8", ...options.headers } });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel();
         if (options.redirects === false || hop === 5) throw new Error("Source redirect refused");

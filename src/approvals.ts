@@ -53,7 +53,7 @@ export async function confirmResearch(ctx: ExtensionContext, proposal: {
     `Role model overrides: ${JSON.stringify(config.models)}`,
     `Search: ${config.searchProvider}${config.searchProvider === "duckduckgo" ? " (free/keyless; may be rate-limited or blocked by bot challenges)" : ""}`,
     `Scholarly: ${config.scholarlyProviders.join(", ") || "disabled"}`,
-    `Full-text resolvers: ${config.fullTextResolvers.join(", ") || "disabled"} (Unpaywall needs HYPERRESEARCH_CONTACT_EMAIL; CORE needs CORE_API_KEY)`,
+    `Full-text resolvers: ${config.fullTextResolvers.join(", ") || "disabled"} (Unpaywall needs TURING_CONTACT_EMAIL; CORE needs CORE_API_KEY)`,
     `Model ceiling: ${config.budgetUsd === null ? "unlimited" : `$${config.budgetUsd}`} (search fees separate).`,
     selected ? (useProjectConfig ? `Proposed configuration replacement from ${ctx.cwd}:\n${JSON.stringify(config, null, 2)}\nPrevious: ${JSON.stringify(selected.config)}\nSaved context and default model remain unchanged.` : "Uses saved configuration and context, not this project's files.")
       : hasContextPreview ? "Only the separately approved context will be attached; no ambient integrations are loaded." : "No local files or integrations attached.",

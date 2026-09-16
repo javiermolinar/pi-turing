@@ -16,7 +16,7 @@ export default function preview(pi: ExtensionAPI) {
       state.status = args === "paused" ? "paused" : args === "done" ? "done" : "running";
       state.activity = { text: "research-1: Reading primary-source-note · page 2", at: new Date(Date.now() - 7000).toISOString() };
       state.feedback = [{ id: 1, text: "Prioritize primary sources", status: "queued", createdAt: new Date().toISOString() }];
-      ctx.ui.setWidget("hyperresearch-demo", (tui, theme) => {
+      ctx.ui.setWidget("turing-demo", (tui, theme) => {
         widget = new ResearchWidget(() => tui.requestRender(), theme);
         widget.update(state, state.status === "running"); return widget;
       });

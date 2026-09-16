@@ -82,9 +82,10 @@ jobs:
           import { readFileSync } from 'node:fs';
           const [pack] = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/package/manifest.json`, 'utf8'));
           const files = new Set(pack.files.map(file => file.path));
-          for (const required of ['package.json', 'extensions/index.ts', 'src/runner.ts', 'src/source-id.ts', 'web/app.js', 'web/style.css', 'skills/hyperresearch/SKILL.md', 'README.md', 'LICENSE']) {
+          for (const required of ['package.json', 'extensions/index.ts', 'src/runner.ts', 'src/source-id.ts', 'web/app.js', 'web/style.css', 'skills/turing/SKILL.md', 'assets/turing-hero.jpg', 'README.md', 'LICENSE']) {
             assert.ok(files.has(required), `Missing package file: ${required}`);
           }
+          assert.ok(!files.has('skills/hyperresearch/SKILL.md'), 'Retired skill must not be loaded alongside Turing');
           for (const file of files) {
             assert.ok(!/^(?:\.pi|\.github|\.hyperresearch|\.pi-research|research|artifacts|tests|backend|node_modules)\//.test(file), `Unexpected package file: ${file}`);
             assert.ok(!/^(?:PLAN|PARITY|INTEGRATIONS)\.md$/.test(file), `Retired document in package: ${file}`);

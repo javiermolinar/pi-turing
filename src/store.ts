@@ -15,7 +15,11 @@ export function atomicWrite(path: string, text: string): void {
   finally { if (existsSync(temp)) unlinkSync(temp); }
 }
 export function loadConfig(cwd: string): Config {
-  const file = join(cwd, ".pi", "hyperresearch.json");
+  const current = join(cwd, ".pi", "turing.json");
+  const legacy = join(cwd, ".pi", "hyperresearch.json");
+  // The canonical file takes precedence. Invalid new config must not silently
+  // fall back to old settings or change the selected provider/budget.
+  const file = existsSync(current) ? current : legacy;
   return configSchema.parse(existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {});
 }
 export class RunStore {

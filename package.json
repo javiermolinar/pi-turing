@@ -1,7 +1,11 @@
 {
-  "name": "pi-hyperresearch",
-  "version": "0.1.0",
-  "description": "Composable research for Pi with private runs, evidence tracking and portable reports",
+  "name": "pi-turing",
+  "version": "0.2.0",
+  "description": "Turing: research for the questions behind your code",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/javiermolinar/pi-turing.git"
+  },
   "type": "module",
   "license": "MIT",
   "keywords": [

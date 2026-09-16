@@ -65,7 +65,7 @@ export class RunPicker implements Component, Focusable {
   invalidate(): void { this.input.invalidate(); this.list.invalidate(); }
   render(width: number): string[] {
     if (width < 1) return [""];
-    return [this.theme.fg("accent", this.theme.bold("Hyperresearch · saved investigations")),
+    return [this.theme.fg("accent", this.theme.bold("Turing · saved investigations")),
       ...this.input.render(width), "", ...this.list.render(width),
       ...(this.visible.length === 1 ? [this.theme.fg("muted", this.rows.length ? "No matching runs." : "No saved runs yet.")] : []),
       "", ...this.visible[this.selected].details.map(line => this.theme.fg("muted", line)), "",

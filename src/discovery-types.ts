@@ -33,7 +33,7 @@ export type DiscoveryBatch = z.infer<typeof discoveryBatchSchema>;
 export interface ScholarlyAdapter {
   id: ScholarlyProvider;
   kinds?: DiscoveryKind[];
-  credential?: "CORE_API_KEY" | "FRED_API_KEY" | "HYPERRESEARCH_CONTACT_EMAIL";
+  credential?: "CORE_API_KEY" | "FRED_API_KEY" | "TURING_CONTACT_EMAIL";
   endpoint(query: string, contact?: string, key?: string): URL;
   headers?(key?: string, contact?: string): Record<string, string>;
   parse(payload: unknown, retrievedAt: string): { results: DiscoveryWork[]; skipped: number; truncated: boolean };

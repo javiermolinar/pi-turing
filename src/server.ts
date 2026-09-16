@@ -123,7 +123,8 @@ async function startServer(scope: Scope, controls?: DashboardControls): Promise<
         res.end(route.endsWith(".css") ? dashboardCss : dashboardScript); return;
       }
       if (route === `/${token}/controls` || route === `/${token}/actions`) {
-        if (!controls || req.headers["x-hyperresearch-control"] !== controlToken ||
+        // Retain the legacy header for existing authenticated dashboard clients.
+        if (!controls || (req.headers["x-turing-control"] ?? req.headers["x-hyperresearch-control"]) !== controlToken ||
           (route.endsWith("/actions") && (req.method !== "POST" || req.headers.origin !== origin || req.headers["content-type"] !== "application/json"))) {
           res.writeHead(403).end("Forbidden"); return;
         }

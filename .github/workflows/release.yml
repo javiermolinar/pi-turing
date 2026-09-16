@@ -37,7 +37,7 @@ jobs:
           import { appendFileSync, readFileSync } from 'node:fs';
           const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
           const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
-          assert.equal(pkg.name, 'pi-hyperresearch');
+          assert.equal(pkg.name, 'pi-turing');
           assert.equal(typeof pkg.version, 'string');
           const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(pkg.version);
           assert.ok(match, 'Use X.Y.Z or X.Y.Z-prerelease versions');

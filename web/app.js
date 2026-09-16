@@ -231,7 +231,7 @@ function paintFeedback() {
 }
 async function postAction(action) {
   const response = await fetch(new URL('actions', base), {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hyperresearch-Control': controlToken }, body: JSON.stringify(action),
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Turing-Control': controlToken }, body: JSON.stringify(action),
   });
   const data = await response.json();
   if (!response.ok) { const error = new Error(data.error || 'Action refused. Check Pi.'); error.definitive = true; throw error; }
@@ -287,8 +287,8 @@ async function openCloseDialog() {
   const dialog = byId('close-dialog');
   byId('close-status').textContent = '';
   try {
-    const response = await fetch(new URL('controls', base), { headers: { 'X-Hyperresearch-Control': controlToken } });
-    if (!response.ok) throw new Error('Controls unavailable. Use /hyperresearch close in Pi.');
+    const response = await fetch(new URL('controls', base), { headers: { 'X-Turing-Control': controlToken } });
+    if (!response.ok) throw new Error('Controls unavailable. Use /turing close in Pi.');
     closeState = await response.json(); closeAttempt = undefined;
     byId('close-description').textContent = closeState.preparing ? 'Another action is starting or awaiting permission. Wait for it to finish before closing.'
       : closeState.activeTag ? `Pi still owns active research (${closeState.activeTag}). Hide the UI without stopping work, or pause it safely before closing.`
@@ -309,7 +309,7 @@ async function closeResearch(mode) {
     const result = await postAction(closeAttempt);
     switchAway(); searching?.abort(); uiClosed = true; clearInterval(clock); feedbackDrafts.clear();
     dialog.close(); byId('inventory').hidden = true; byId('main').hidden = false;
-    byId('main').textContent = result.message + ' Reopen with /hyperresearch in Pi. You can close this browser tab.';
+    byId('main').textContent = result.message + ' Reopen with /turing in Pi. You can close this browser tab.';
     document.querySelector('.controls').hidden = true; statusEl.textContent = 'Research UI closed';
   } catch (error) {
     if (error.definitive) closeAttempt = undefined;

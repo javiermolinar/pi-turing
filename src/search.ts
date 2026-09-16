@@ -13,7 +13,7 @@ export function ensureSearchConfigured(provider: SearchProvider, env: SearchEnvi
   const adapter = apiSearchProviders[provider];
   const key = env[adapter.key]?.trim();
   if (!key || /[^\x21-\x7e]/.test(key)) {
-    throw new Error(`${adapter.name} requires a valid ${adapter.key}. Set it before launching Pi, or explicitly select another searchProvider in .pi/hyperresearch.json. No fallback will be used.`);
+    throw new Error(`${adapter.name} requires a valid ${adapter.key}. Set it before launching Pi, or explicitly select another searchProvider in .pi/turing.json. No fallback will be used.`);
   }
 }
 

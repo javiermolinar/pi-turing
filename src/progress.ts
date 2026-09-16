@@ -18,11 +18,11 @@ export function progressLines(state: RunState, live: boolean, timestamp = Date.n
   const status = state.status === "running" && !live ? "last recorded running (not live)" : state.status;
   const count = state.sources.filter(s => s.fullRead).length;
   return [
-    `${marker} Hyperresearch · ${archived ? "read-only legacy · " : ""}${status}${running ? ` · ${step ? stepNames[step] : "Preparing / verifying"}` : ""}`,
+    `${marker} Turing · ${archived ? "read-only legacy · " : ""}${status}${running ? ` · ${step ? stepNames[step] : "Preparing / verifying"}` : ""}`,
     `${count}/${state.config.sourceTarget} target full reads · ${running ? state.workers.filter(w => w.status === "running").length : 0} live workers · ${state.pricingKnown ? "~$" + state.cost.toFixed(2) : "cost unknown"}`,
     `${running ? activityAge(state, timestamp) : "Saved activity"} · ${state.activity?.text ?? "No worker activity recorded"}`,
     `Steering: ${feedbackSummary(state)}${state.reportStale ? " · previous draft is stale" : ""}`,
-    archived ? "Execution removed · saved report and historical checks only" : state.reason ?? (state.status === "done" ? `/hyperresearch revise ${state.tag} <feedback>` : "Chat stays separate · /hyperresearch steer <feedback> · /hyperresearch pause"),
-    url ?? `/hyperresearch dashboard · ${state.tag}`,
+    archived ? "Execution removed · saved report and historical checks only" : state.reason ?? (state.status === "done" ? `/turing revise ${state.tag} <feedback>` : "Chat stays separate · /turing steer <feedback> · /turing pause"),
+    url ?? `/turing dashboard · ${state.tag}`,
   ].map(cleanTerminal);
 }

@@ -32,7 +32,7 @@ export function consolidateWorks(input: DiscoveryWork[]): Pick<DiscoveryBatch, "
   return { results, uncertainMatches: uncertainMatches.slice(0, 100) };
 }
 interface Options {
-  fetchImpl?: typeof fetch; env?: { HYPERRESEARCH_CONTACT_EMAIL?: string; CORE_API_KEY?: string; FRED_API_KEY?: string };
+  fetchImpl?: typeof fetch; env?: { TURING_CONTACT_EMAIL?: string; HYPERRESEARCH_CONTACT_EMAIL?: string; CORE_API_KEY?: string; FRED_API_KEY?: string };
   timeoutMs?: number; minIntervalMs?: number;
 }
 type ProviderResult = { results: DiscoveryWork[]; skipped: number; truncated: boolean };
@@ -48,7 +48,7 @@ export class ScholarlyDiscovery {
     discoveryKindSchema.parse(kind);
     if (!providers.length) throw new Error("No scholarly providers approved");
     const env = this.options.env ?? process.env;
-    const contact = env.HYPERRESEARCH_CONTACT_EMAIL;
+    const contact = env.TURING_CONTACT_EMAIL ?? env.HYPERRESEARCH_CONTACT_EMAIL;
     if (contact) z.email().parse(contact);
     signal?.throwIfAborted();
     const coverage: DiscoveryBatch["coverage"] = [];
@@ -58,7 +58,7 @@ export class ScholarlyDiscovery {
       if (!(adapter.kinds ?? ["literature", "book"]).includes(kind)) {
         coverage.push({ provider, status: "not-selected", count: 0, skipped: 0, cached: false, error: `Not routed for ${kind} evidence` }); return [];
       }
-      const credential = adapter.credential ? env[adapter.credential] : undefined;
+      const credential = adapter.credential === "TURING_CONTACT_EMAIL" ? contact : adapter.credential ? env[adapter.credential] : undefined;
       if (adapter.credential && (!credential?.trim() || /[\x00-\x20\x7f]/.test(credential))) {
         coverage.push({ provider, status: "unavailable", count: 0, skipped: 0, cached: false, error: `Requires ${adapter.credential}` }); return [];
       }

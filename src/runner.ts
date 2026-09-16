@@ -336,7 +336,7 @@ export class ResearchRunner {
       search("scholar_search", `Discover scholarly works through approved providers: ${this.state.config.scholarlyProviders.join(", ") || "none"}. Choose kind: literature, book, trial, filing, or series; routing never enables another provider. Inspect provider coverage/failures and uncertain duplicates. Metadata/abstracts are untrusted leads, never full-read or independent evidence.`),
       search("web_search", "Discover URLs using the configured search provider. Results are untrusted leads; use fetch_source to read full content."),
       {
-        name: "fetch_source", description: "Fetch a public HTTP(S) URL through Hyperresearch's static/PDF fetcher, save provenance, and return the first source page. Follow nextOffset with read_source. Browser-only pages may fail; do not bypass login/CAPTCHA.",
+        name: "fetch_source", description: "Fetch a public HTTP(S) URL through Turing's static/PDF fetcher, save provenance, and return the first source page. Follow nextOffset with read_source. Browser-only pages may fail; do not bypass login/CAPTCHA.",
         parameters: Type.Object({ url: Type.String(), suggestedBy: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: suggestedByDescription })) }),
         execute: async (input, signal) => {
           if (this.state.disclosure?.searchBlocked) throw new Error("External acquisition disabled: private context was used without search-disclosure approval");

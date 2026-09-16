@@ -23,44 +23,45 @@ import { pickerRows, RunPicker, runActions } from "../src/picker.ts";
 import { portableMarkdown, prepareSave, saveMarkdown } from "../src/export.ts";
 import { cleanTerminal, requireLightRun, isReadOnlyRun, feedbackTextSchema, message, type RunState } from "../src/types.ts";
 
-const help = `Hyperresearch — research, review, and follow up
-/hyperresearch              Open the dashboard
-/hyperresearch <question>   Start research with Pi approval
-/hyperresearch close        Hide the UI, or pause and close
-/hyperresearch help         Show this help
+const help = `Turing — research for the questions behind your code
+/turing              Open the dashboard
+/turing <question>   Start research with Pi approval
+/turing close        Hide the UI, or pause and close
+/turing help         Show this help
 
 Browse, read, steer, follow up, and export in the dashboard.
 Steering updates ongoing work. The follow-up button authorizes its displayed model-cost ceiling.
 Private-context reuse requires separate permission in Pi.
 Closing the UI preserves saved investigations and never silently cancels research.
 Default model-cost ceiling: ~$15; search fees are separate.
-Advanced/compatibility commands: /hyperresearch help advanced`;
+Advanced/compatibility commands: /turing help advanced`;
 
-const advancedHelp = `Hyperresearch — advanced and compatibility commands
-/hyperresearch browse           Browse saved investigations in the terminal
-/hyperresearch list             List central runs without opening a picker
-/hyperresearch start <question>  Start research using the selected Pi model
-/hyperresearch status [tag]      Show persisted progress
-/hyperresearch steer <feedback>  Queue feedback; offer a revision if already done
-/hyperresearch context [tag]     Approve local context for a paused run (or revoke)
-/hyperresearch revise <tag> <feedback>  New revision of a completed report
-/hyperresearch pause             Interrupt safely; keep artifacts
-/hyperresearch resume [tag]      Resume with saved context/configuration
+const advancedHelp = `Turing — advanced and compatibility commands
+/turing browse           Browse saved investigations in the terminal
+/turing list             List central runs without opening a picker
+/turing start <question>  Start research using the selected Pi model
+/turing status [tag]      Show persisted progress
+/turing steer <feedback>  Queue feedback; offer a revision if already done
+/turing context [tag]     Approve local context for a paused run (or revoke)
+/turing revise <tag> <feedback>  New revision of a completed report
+/turing pause             Interrupt safely; keep artifacts
+/turing resume [tag]      Resume with saved context/configuration
   Exhausted budgets offer an approved $15 top-up; spend is never reset
   Add --add-budget <USD> to explicitly increase this run's total ceiling
   Or --use-project-config to propose current project preferences (not both)
-/hyperresearch cancel            Abort; keep artifacts
-/hyperresearch dashboard         Open full inventory, focused on the active run if any
-/hyperresearch dashboard <tag>   Open full inventory, focused on this investigation
-/hyperresearch dashboard all     Open the full inventory list
-/hyperresearch snapshot [tag]    Generate/open standalone HTML
-/hyperresearch export [tag]      Browser-managed Markdown download
-/hyperresearch save [--overwrite] <tag> <path.md>  Save a portable report
-/hyperresearch migrate [apply]   Preview/copy this checkout's legacy runs
-/hyperresearch migrate rollback <id>  Roll back an unchanged migration
+/turing cancel            Abort; keep artifacts
+/turing dashboard         Open full inventory, focused on the active run if any
+/turing dashboard <tag>   Open full inventory, focused on this investigation
+/turing dashboard all     Open the full inventory list
+/turing snapshot [tag]    Generate/open standalone HTML
+/turing export [tag]      Browser-managed Markdown download
+/turing save [--overwrite] <tag> <path.md>  Save a portable report
+/turing migrate [apply]   Preview/copy this checkout's legacy runs
+/turing migrate rollback <id>  Roll back an unchanged migration
 
 A bare question also starts a run using configured defaults, without a context questionnaire.
-Files/readers are opt-in via config or /hyperresearch context. Config: .pi/hyperresearch.json.
+Files/readers are opt-in via config or /turing context. Config: .pi/turing.json.
+The old /hyperresearch command and .pi/hyperresearch.json remain supported.
 Light research only. Default model-cost ceiling: ~$15, not a completion estimate.
 Full/extended execution has been removed; old runs remain read-only.
 Search fees are separate; in-flight model calls may overshoot.
@@ -73,7 +74,7 @@ Revisions preserve the parent report and start with a fresh cost ceiling.`;
 
 type ViewCommand = "status" | "dashboard" | "snapshot" | "export";
 
-export default function hyperresearch(pi: ExtensionAPI) {
+export default function turing(pi: ExtensionAPI) {
   let controller = new RunController();
   let latest: RunState | undefined;
   let uiHidden = false;
@@ -91,6 +92,8 @@ export default function hyperresearch(pi: ExtensionAPI) {
   const trusted = (ctx: ExtensionContext) => {
     if (!ctx.isProjectTrusted()) throw new Error("Trust this project in Pi before starting research or reading project-local configuration.");
   };
+  // Keep the legacy JSON event/custom-entry identifiers stable for consumers
+  // and saved sessions; visible names and command guidance use Turing.
   const say = (ctx: ExtensionContext, text: string, level: "info" | "warning" | "error" = "info") => {
     const safe = text.split("\n").map(cleanTerminal).join("\n");
     if (ctx.hasUI) ctx.ui.notify(safe, level);
@@ -105,17 +108,17 @@ export default function hyperresearch(pi: ExtensionAPI) {
     latest = structuredClone(state);
     const url = dashboardUrl(state.tag);
     if (ctx.mode === "tui") {
-      if (!widget) ctx.ui.setWidget("hyperresearch", (tui, theme) => {
+      if (!widget) ctx.ui.setWidget("turing", (tui, theme) => {
         widget = new ResearchWidget(() => tui.requestRender(), theme);
         widget.update(latest!, live, url);
         return widget;
       });
       widget?.update(latest, live, url);
-    } else if (ctx.hasUI) ctx.ui.setWidget("hyperresearch", progressLines(state, live, Date.now(), 0, url));
+    } else if (ctx.hasUI) ctx.ui.setWidget("turing", progressLines(state, live, Date.now(), 0, url));
   };
   const resolveState = (ctx: ExtensionContext, tag?: string): RunState => {
     const state = tag ? new RunStore(dataRoot(), tag).load() : controller.active?.state ?? latest ?? listRuns(dataRoot()).find(s => s.location?.projectPath === realpathSync(ctx.cwd));
-    if (!state) throw new Error("No selected Hyperresearch run. Supply a central run ID.");
+    if (!state) throw new Error("No selected Turing run. Supply a central run ID.");
     if (state.status === "running" && controller.active?.state.tag !== state.tag) {
       return { ...state, reason: "Last recorded as running. This Pi session is showing saved state, not live worker activity; another process may own the vault." };
     }
@@ -147,7 +150,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
       const { runner, done } = started;
       sessionRuns.add(runner.state.tag);
       show(runner.state, ctx);
-      say(ctx, `Starting ${runner.state.profile} research: ${runner.state.tag} (search: ${runner.state.config.searchProvider}). /hyperresearch dashboard opens live progress.`);
+      say(ctx, `Starting ${runner.state.profile} research: ${runner.state.tag} (search: ${runner.state.config.searchProvider}). /turing dashboard opens live progress.`);
       void done.then(() => { if (!uiHidden) say(ctx, `${runner.state.status}: ${runner.state.reason ?? runner.store.reportPath}`); })
         .catch(error => { if (!uiHidden) say(ctx, `Research failed: ${message(error)}`, "error"); })
         .finally(() => closeIdleViews()).catch(() => {});
@@ -173,7 +176,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
     const active = controller.active;
     if (fromDashboard && mode === "pause" && active?.state.tag !== expectedTag) throw new Error("The active investigation changed. Reopen the close dialog.");
     if (!mode && active) {
-      if (!ctx.hasUI) throw new Error("Research is active. Use /hyperresearch close hide or /hyperresearch close pause.");
+      if (!ctx.hasUI) throw new Error("Research is active. Use /turing close hide or /turing close pause.");
       const choice = await ctx.ui.select("Close research UI? Saved investigations are preserved.", ["Hide UI, keep running", "Pause and close", "Cancel"], { signal: controller.signal });
       if (!choice || choice === "Cancel") return;
       if (controller.active !== active || controller.preparing) throw new Error("The active investigation changed. Try closing again.");
@@ -181,17 +184,17 @@ export default function hyperresearch(pi: ExtensionAPI) {
     }
     closingFromDashboard = fromDashboard;
     uiHidden = true; latest = undefined; disposeWidget();
-    if (ctx.hasUI) ctx.ui.setWidget("hyperresearch", undefined);
+    if (ctx.hasUI) ctx.ui.setWidget("turing", undefined);
     if (mode === "pause" && active) await controller.stop("paused");
     if (!fromDashboard) {
       await closeIdleViews();
-      say(ctx, controller.busy ? "Research UI hidden. Work continues; /hyperresearch reopens it." : "Research UI closed. Saved investigations are preserved; /hyperresearch reopens them.");
+      say(ctx, controller.busy ? "Research UI hidden. Work continues; /turing reopens it." : "Research UI closed. Saved investigations are preserved; /turing reopens them.");
     }
   }
 
   function dashboardControls(ctx: ExtensionContext): DashboardControls {
     const feedback = (state: RunState): FeedbackControl => {
-      if (!ctx.isProjectTrusted() || uiHidden || controller.signal.aborted) return { reason: "Controls are closed. Reopen with /hyperresearch in Pi." };
+      if (!ctx.isProjectTrusted() || uiHidden || controller.signal.aborted) return { reason: "Controls are closed. Reopen with /turing in Pi." };
       if (isReadOnlyRun(state)) return { reason: "Historical investigation: read-only." };
       if (controller.preparing) return { reason: "Another action is starting or awaiting permission. Wait for it to finish first." };
       if (state.status === "running" && controller.active?.state.tag === state.tag) return { mode: "steer" };
@@ -303,14 +306,14 @@ export default function hyperresearch(pi: ExtensionAPI) {
         requireLocation(state, dataRoot());
         const note = queueFeedback(state, feedback);
         store.save(state); show(state, ctx);
-        say(ctx, `Feedback ${note.id} queued for ${state.tag}. /hyperresearch resume applies it and replans; no workers started.`);
+        say(ctx, `Feedback ${note.id} queued for ${state.tag}. /turing resume applies it and replans; no workers started.`);
       } finally { await unlock(); }
     });
     if (completedTag) await reviseFromSteering(ctx, completedTag, feedback);
   }
 
   async function reviseFromSteering(ctx: ExtensionContext, tag: string, feedback: string): Promise<void> {
-    say(ctx, `Run ${tag} is already complete; this feedback was not queued. A revision preserves the original report and starts a new paid run with a fresh cost ceiling.\n/hyperresearch revise ${tag} ${feedback}`);
+    say(ctx, `Run ${tag} is already complete; this feedback was not queued. A revision preserves the original report and starts a new paid run with a fresh cost ceiling.\n/turing revise ${tag} ${feedback}`);
     if (!ctx.hasUI) return; // Never silently turn non-interactive steering into new paid work.
     // A runner can publish "done" before the controller has released its locks.
     await controller.waitForCompletion();
@@ -374,7 +377,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
       if (argument && argument !== "apply") throw new Error("Usage: migrate [apply] or migrate rollback <id>");
       const preview = previewMigration(ctx.cwd, dataRoot());
       say(ctx, JSON.stringify(preview, null, 2));
-      if (argument !== "apply") { say(ctx, "Preview only. Use /hyperresearch migrate apply to copy and validate; originals remain."); return; }
+      if (argument !== "apply") { say(ctx, "Preview only. Use /turing migrate apply to copy and validate; originals remain."); return; }
       if (ctx.hasUI && !await ctx.ui.confirm("Copy legacy runs?", "Copy and validate the previewed workspace and runs. Stop upstream CLI writers first. Originals remain; no workers or network calls start.", { signal })) return;
       signal.throwIfAborted();
       const id = await migrateLegacy(preview, { signal });
@@ -386,7 +389,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
     trusted(ctx);
     const rows = pickerRows(inventory(dataRoot()), controller.active?.state.tag);
     if (listOnly || !ctx.hasUI) {
-      say(ctx, rows.length ? rows.map(row => `${row.id}: ${row.title} · ${row.description}`).join("\n") : "No saved runs. Use /hyperresearch start <question>.");
+      say(ctx, rows.length ? rows.map(row => `${row.id}: ${row.title} · ${row.description}`).join("\n") : "No saved runs. Use /turing start <question>.");
       return;
     }
     const signal = controller.signal;
@@ -420,7 +423,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
     } else if (action === "Pause" || action === "Cancel") await controller.stop(action === "Pause" ? "paused" : "aborted");
   }
 
-  pi.registerCommand("hyperresearch", {
+  const command: Parameters<ExtensionAPI["registerCommand"]>[1] = {
     description: "Research with a persistent vault and live/offline HTML dashboard",
     getArgumentCompletions: prefix => ["close", "help"]
       .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
@@ -432,7 +435,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
         if (command === "help") { say(ctx, argument === "advanced" ? advancedHelp : help); return; }
         if (!input) { await view(ctx, "dashboard"); return; }
         if (command === "close") {
-          if (argument && argument !== "hide" && argument !== "pause") throw new Error("Usage: /hyperresearch close [hide|pause]");
+          if (argument && argument !== "hide" && argument !== "pause") throw new Error("Usage: /turing close [hide|pause]");
           await closeUI(ctx, argument as "hide" | "pause" || undefined); return;
         }
         if (command === "browse" || command === "list") { await browse(ctx, command === "list"); return; }
@@ -445,7 +448,7 @@ export default function hyperresearch(pi: ExtensionAPI) {
         }
         if (command === "migrate") { await migrate(ctx, rest); return; }
         // Retain the harmless installer-era hint for existing users.
-        if (command === "setup") { say(ctx, "No setup needed. Hyperresearch runs on Node.js; start with /hyperresearch <question>."); return; }
+        if (command === "setup") { say(ctx, "No setup needed. Turing runs on Node.js; start with /turing <question>."); return; }
         if (command === "context") { await changeContext(ctx, argument || undefined); return; }
         if (command === "steer") { await steer(ctx, argument); return; }
         if (command === "pause" || command === "cancel") {
@@ -459,19 +462,21 @@ export default function hyperresearch(pi: ExtensionAPI) {
         }
         if (command === "revise") {
           const [tag, ...feedback] = rest;
-          if (!tag || !feedback.length) throw new Error("Usage: /hyperresearch revise <tag> <feedback>");
+          if (!tag || !feedback.length) throw new Error("Usage: /turing revise <tag> <feedback>");
           await launchCommand(ctx, { kind: "revise", tag, feedback: feedbackTextSchema.parse(feedback.join(" ")) });
         } else if (command === "resume") {
           trusted(ctx);
           const options = parseResumeOptions(rest);
           await launchCommand(ctx, { kind: "resume", ...options, tag: options.tag ?? resolveState(ctx).tag });
         } else await launchCommand(ctx, { kind: "start", query: command === "start" ? input.slice(6).trim() : input });
-      } catch (error) { say(ctx, `Hyperresearch: ${message(error)}`, "error"); }
+      } catch (error) { say(ctx, `Turing: ${message(error)}`, "error"); }
     },
-  });
+  };
+  pi.registerCommand("turing", command);
+  pi.registerCommand("hyperresearch", { ...command, description: "Legacy alias for /turing" });
   pi.registerTool({
-    name: "hyperresearch_run", label: "Hyperresearch",
-    description: "Run light research and wait for its report or explicit failure. Structural/quote checks are not factual verification. Only use when the user explicitly requests research with Hyperresearch. May take 30+ minutes and incur model/search costs; default model estimate ceiling ~$15. No separate backend setup required.",
+    name: "turing_run", label: "Turing",
+    description: "Run light research and wait for its report or explicit failure. Structural/quote checks are not factual verification. Only use when the user explicitly requests research with Turing. May take 30+ minutes and incur model/search costs; default model estimate ceiling ~$15. No separate backend setup required.",
     parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 30_000 }) }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const started = await launch(ctx, { kind: "start", query: params.query }, signal);
@@ -480,17 +485,17 @@ export default function hyperresearch(pi: ExtensionAPI) {
       const { runner } = started;
       const state = runner.state;
       if (state.status !== "done") throw new Error(state.reason ?? "Research did not complete");
-      return { content: [{ type: "text", text: state.inputs ? `${state.profile} research completed with approved private/scoped context. View it with /hyperresearch dashboard ${state.tag}. Do not read its checkpoint or report into this chat without explicit disclosure approval for the current chat model.` : `${state.profile} research completed its required gates (not proof of truth). Report: ${runner.store.reportPath}\nOffline snapshot: /hyperresearch snapshot ${state.tag}` }], details: { tag: state.tag, cost: state.cost, tokens: state.tokens } };
+      return { content: [{ type: "text", text: state.inputs ? `${state.profile} research completed with approved private/scoped context. View it with /turing dashboard ${state.tag}. Do not read its checkpoint or report into this chat without explicit disclosure approval for the current chat model.` : `${state.profile} research completed its required gates (not proof of truth). Report: ${runner.store.reportPath}\nOffline snapshot: /turing snapshot ${state.tag}` }], details: { tag: state.tag, cost: state.cost, tokens: state.tokens } };
     },
   });
   pi.on("before_agent_start", (event, ctx) => {
     const state = controller.active?.state ?? latest;
     if (uiHidden || !state || !ctx.isProjectTrusted()) return;
     return {
-      systemPrompt: event.systemPrompt + "\nHyperresearch workers are isolated from this chat. Ordinary prompts do not steer them. " +
+      systemPrompt: event.systemPrompt + "\nTuring workers are isolated from this chat. Ordinary prompts do not steer them. " +
         (state.inputs ? "Contextual research was approved for its saved research models, not automatic disclosure to this chat. Answer progress questions from the status fields below; obtain explicit user approval before reading its checkpoint, report or snapshots into the current chat model. " : "For progress questions, read the checkpoint or report as needed. ") +
         "Do not edit host-owned research state or claim feedback was applied through chat. " +
-        "Direct the user to /hyperresearch steer <feedback> or /hyperresearch revise <tag> <feedback> for changes.",
+        "Direct the user to /turing steer <feedback> or /turing revise <tag> <feedback> for changes.",
       message: { customType: "hyperresearch-context", display: false, content: JSON.stringify({
         tag: state.tag, status: state.status, liveInThisSession: !!controller.active, activity: state.activity,
         steering: feedbackSummary(state),
@@ -511,6 +516,6 @@ export default function hyperresearch(pi: ExtensionAPI) {
     await exportDashboard?.close(); exportDashboard = undefined; exportTag = undefined;
     await inventoryDashboard?.close(); inventoryDashboard = undefined;
     disposeWidget();
-    if (ctx.hasUI) ctx.ui.setWidget("hyperresearch", undefined);
+    if (ctx.hasUI) ctx.ui.setWidget("turing", undefined);
   });
 }

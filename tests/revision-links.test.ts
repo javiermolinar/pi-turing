@@ -51,7 +51,7 @@ test("revision references do not broaden single-run or selected-run capabilities
     for (const server of [single, childrenOnly]) {
       const page = await html(server, child.tag);
       assert.match(page, /Unavailable in this view/);
-      assert.match(page, /\/hyperresearch dashboard original/);
+      assert.match(page, /\/turing dashboard original/);
       assert.doesNotMatch(page, /data-related-run=/);
       assert.equal((await fetch(new URL("run?id=original", server.url))).status, 404);
     }

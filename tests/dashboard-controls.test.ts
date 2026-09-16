@@ -24,6 +24,9 @@ test("dashboard writes require a separate secret, exact origin, JSON, bounded in
     const html = await (await fetch(server.url)).text();
     const secret = /data-control-token="([a-f0-9]+)"/.exec(html)![1];
     assert.ok(secret);
+    const controlUrl = new URL("controls", server.url);
+    assert.equal((await fetch(controlUrl, { headers: { "X-Turing-Control": secret } })).status, 200);
+    assert.equal((await fetch(controlUrl, { headers: { "X-Turing-Control": "wrong", "X-Hyperresearch-Control": secret } })).status, 403);
     const headers = { Origin: new URL(server.url).origin, "Content-Type": "application/json", "X-Hyperresearch-Control": secret };
     const action = { id: randomUUID(), kind: "steer", tag: state.tag, text: "Prioritize evidence" };
     const post = (body: unknown, custom = headers, url = new URL("actions", server.url)) => fetch(url, { method: "POST", headers: custom, body: JSON.stringify(body) });

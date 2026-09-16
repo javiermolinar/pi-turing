@@ -9,7 +9,7 @@ import { abortable } from "./http.ts";
 import type { Source } from "./types.ts";
 
 export type Resolver = "unpaywall" | "europepmc" | "core";
-export interface AcquisitionOptions { request?: PublicRequest; env?: { HYPERRESEARCH_CONTACT_EMAIL?: string; CORE_API_KEY?: string } }
+export interface AcquisitionOptions { request?: PublicRequest; env?: { TURING_CONTACT_EMAIL?: string; HYPERRESEARCH_CONTACT_EMAIL?: string; CORE_API_KEY?: string } }
 const resolverSchema = z.enum(["unpaywall", "europepmc", "core"]);
 const object = (value: unknown): Record<string, any> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 const array = (value: unknown): any[] => Array.isArray(value) ? value : [];
@@ -18,8 +18,8 @@ const key = (value: string | undefined) => value && !/[\x00-\x20\x7f]/.test(valu
 const validContact = (value: string | undefined) => value && z.email().safeParse(value).success ? value : undefined;
 export function resolverCoverage(approved: unknown, env: AcquisitionOptions["env"] = process.env): NonNullable<Source["resolverCoverage"]> {
   return [...new Set(z.array(resolverSchema).max(3).parse(approved))].map(resolver => {
-    const required = resolver === "unpaywall" ? "HYPERRESEARCH_CONTACT_EMAIL" : resolver === "core" ? "CORE_API_KEY" : undefined;
-    const available = !required || !!(resolver === "unpaywall" ? validContact(env?.HYPERRESEARCH_CONTACT_EMAIL) : key(env?.CORE_API_KEY));
+    const required = resolver === "unpaywall" ? "TURING_CONTACT_EMAIL" : resolver === "core" ? "CORE_API_KEY" : undefined;
+    const available = !required || !!(resolver === "unpaywall" ? validContact(env?.TURING_CONTACT_EMAIL ?? env?.HYPERRESEARCH_CONTACT_EMAIL) : key(env?.CORE_API_KEY));
     return { resolver, available, reason: available ? null : `Requires ${required}` };
   });
 }
@@ -37,7 +37,7 @@ export class Acquisition {
   private async candidates(resolver: Resolver, doi: string, signal?: AbortSignal): Promise<Candidate[]> {
     const env = this.options.env ?? process.env;
     if (resolver === "unpaywall") {
-      const contact = validContact(env.HYPERRESEARCH_CONTACT_EMAIL); if (!contact) return [];
+      const contact = validContact(env.TURING_CONTACT_EMAIL ?? env.HYPERRESEARCH_CONTACT_EMAIL); if (!contact) return [];
       const url = new URL(`https://api.unpaywall.org/v2/${encodeURIComponent(doi)}`); url.searchParams.set("email", contact);
       const data = object(await metadata(this.request, url.href, signal));
       if (data.is_oa !== true) return [];

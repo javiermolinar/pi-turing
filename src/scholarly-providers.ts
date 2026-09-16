@@ -208,9 +208,9 @@ export const scholarlyAdapters: Record<ScholarlyProvider, ScholarlyAdapter> = {
   clinicaltrials: { id: "clinicaltrials", kinds: ["trial"], endpoint(query) {
     const url = new URL("https://clinicaltrials.gov/api/v2/studies"); url.searchParams.set("query.term", query); url.searchParams.set("format", "json"); url.searchParams.set("pageSize", "5"); url.searchParams.set("countTotal", "false"); return url;
   }, parse(payload, at) { return parse(z.object({ studies: z.array(z.unknown()) }).parse(payload).studies, clinicaltrials, at); } },
-  edgar: { id: "edgar", kinds: ["filing"], credential: "HYPERRESEARCH_CONTACT_EMAIL", endpoint(query) {
+  edgar: { id: "edgar", kinds: ["filing"], credential: "TURING_CONTACT_EMAIL", endpoint(query) {
     const url = new URL("https://efts.sec.gov/LATEST/search-index"); url.searchParams.set("q", query); return url;
-  }, headers(_key, contact) { return { "User-Agent": `pi-hyperresearch mailto:${contact}` }; },
+  }, headers(_key, contact) { return { "User-Agent": `pi-turing mailto:${contact}` }; },
   parse(payload, at) {
     const rows = z.object({ hits: z.object({ hits: z.array(z.unknown()) }) }).parse(payload).hits.hits;
     // EFTS returns 100 documents, often exhibits of the same filing. Keep one

@@ -1,21 +1,25 @@
-# pi-hyperresearch
+# Turing
 
-[![CI](https://github.com/javiermolinar/pi-hyperresearch/actions/workflows/ci.yml/badge.svg)](https://github.com/javiermolinar/pi-hyperresearch/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/javiermolinar/pi-hyperresearch?color=356451)](https://github.com/javiermolinar/pi-hyperresearch/releases)
+[![CI](https://github.com/javiermolinar/pi-turing/actions/workflows/ci.yml/badge.svg)](https://github.com/javiermolinar/pi-turing/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/javiermolinar/pi-turing?color=356451)](https://github.com/javiermolinar/pi-turing/releases)
 [![Pi package](https://img.shields.io/badge/Pi-package-356451)](https://pi.dev)
 [![Node.js 22.13+](https://img.shields.io/badge/Node.js-22.13%2B-356451?logo=nodedotjs&logoColor=white)](#install-in-pi)
 [![MIT license](https://img.shields.io/badge/license-MIT-596359)](LICENSE)
 [![Experimental](https://img.shields.io/badge/status-experimental-9a6700)](#what-is-it)
 
-![Pi Hyperresearch — Deep research inside Pi.](assets/pi-hyperresearch-hero.jpg)
+![Pi Turing — Crack the enigma with deeper research inside Pi.](assets/turing-hero.jpg)
 
-A research workspace for [Pi](https://pi.dev), inspired by [Hyperresearch](https://github.com/jordan-gibbs/hyperresearch) by Jordan Gibbs.
+> "We can only see a short distance ahead, but we can see plenty there that needs to be done."
+>
+> — Alan Turing
+
+Turing (`pi-turing`) is a research workspace for [Pi](https://pi.dev), inspired by [Hyperresearch](https://github.com/jordan-gibbs/hyperresearch) by Jordan Gibbs.
 
 ## What is it?
 
 A research toolkit that searches the web and scholarly literature, reads sources, and turns your question into a report with citations. It uses the model you select in Pi.
 
-This is a research tool, not a knowledge brain. Pair it with tools like [gbrain](https://github.com/garrytan/gbrain) to organize and reuse what you learn. Exported reports provide the handoff; there is no built-in integration.
+
 
 - **Native TypeScript.** Runs directly in Pi on Node.js—no Python, uv, or separate backend setup.
 - **Choose your sources.** Web search through DuckDuckGo, Brave, Tavily, Serply, or Kagi, plus scholarly discovery through OpenAlex, Crossref, and opt-in specialist providers.
@@ -35,7 +39,7 @@ Requires **Node.js 22.13+** and **[Pi](https://pi.dev) with a configured model**
 Install directly from GitHub:
 
 ```bash
-pi install https://github.com/javiermolinar/pi-hyperresearch.git
+pi install https://github.com/javiermolinar/pi-turing.git
 ```
 
 Pi installs the package and its dependencies. Start Pi, or run `/reload` in an existing session when research is idle.
@@ -45,10 +49,17 @@ Pi installs the package and its dependencies. Start Pi, or run `/reload` in an e
 Pause any active research, then run:
 
 ```bash
-pi update https://github.com/javiermolinar/pi-hyperresearch.git
+pi update https://github.com/javiermolinar/pi-turing.git
 ```
 
 Run `/reload` in Pi to load the update. Saved investigations remain intact.
+
+<details>
+<summary>Upgrading from pi-hyperresearch</summary>
+
+No data migration is needed. `/hyperresearch` remains an alias for `/turing`; the tool is now `turing_run`. Use `.pi/turing.json` for new configuration; `.pi/hyperresearch.json` still works when the new file is absent. Storage remains at `~/.pi/hyperresearch`. `TURING_DATA_ROOT` and `TURING_CONTACT_EMAIL` take precedence over their legacy `HYPERRESEARCH_*` equivalents. If you installed from the old repository, pause research and use `pi list` to find that package, then `pi remove <old-source>` before installing from the new URL above. This avoids loading both packages; removing the package does not delete saved investigations.
+
+</details>
 
 ### Search providers
 
@@ -62,7 +73,7 @@ Run `/reload` in Pi to load the update. Saved investigations remain intact.
 | [Serply](https://serply.io/) — Google results | `serply` | `SERPLY_API_KEY` |
 | [Kagi](https://kagi.com/api) | `kagi` | `KAGI_API_KEY` |
 
-For example, select Kagi in your project's `.pi/hyperresearch.json`:
+For example, select Kagi in your project's `.pi/turing.json`:
 
 ```json
 { "searchProvider": "kagi" }
@@ -84,14 +95,14 @@ Scholarly search defaults to OpenAlex and Crossref. If you customize `scholarlyP
 ### Ask a question
 
 ```text
-/hyperresearch Compare SQLite and PostgreSQL for a small local research vault.
+/turing Compare SQLite and PostgreSQL for a small local research vault.
 ```
 
 Approve the cost confirmation and let it run. Research can take **30+ minutes**. The default model-cost ceiling is **approximately $15**, not a price estimate or a hard billing cap; in-flight calls can exceed it, and search fees are separate.
 
-- **Follow and steer:** open `/hyperresearch` to watch progress, inspect sources, and guide the investigation from the box beside the report.
+- **Follow and steer:** open `/turing` to watch progress, inspect sources, and guide the investigation from the box beside the report.
 - **Go deeper:** ask a follow-up in the dashboard to start a new paid investigation linked to the original. The original report stays unchanged.
-- **Come back later:** run `/hyperresearch` in Pi to browse saved investigations and export reports as Markdown or offline HTML.
+- **Come back later:** run `/turing` in Pi to browse saved investigations and export reports as Markdown or offline HTML.
 
 ## Compared with upstream
 

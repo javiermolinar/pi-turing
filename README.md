@@ -2,12 +2,13 @@
 
 [![CI](https://github.com/javiermolinar/pi-turing/actions/workflows/ci.yml/badge.svg)](https://github.com/javiermolinar/pi-turing/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/javiermolinar/pi-turing?color=356451)](https://github.com/javiermolinar/pi-turing/releases)
+[![npm](https://img.shields.io/npm/v/pi-turing?color=356451)](https://www.npmjs.com/package/pi-turing)
 [![Pi package](https://img.shields.io/badge/Pi-package-356451)](https://pi.dev)
 [![Node.js 22.13+](https://img.shields.io/badge/Node.js-22.13%2B-356451?logo=nodedotjs&logoColor=white)](#install-in-pi)
 [![MIT license](https://img.shields.io/badge/license-MIT-596359)](LICENSE)
 [![Experimental](https://img.shields.io/badge/status-experimental-9a6700)](#what-is-it)
 
-![Pi Turing — Crack the enigma with deeper research inside Pi.](assets/turing-hero.jpg)
+![Pi Turing — Crack the enigma with deeper research inside Pi.](https://raw.githubusercontent.com/javiermolinar/pi-turing/master/assets/turing-hero.jpg)
 
 > "We can only see a short distance ahead, but we can see plenty there that needs to be done."
 >
@@ -27,7 +28,7 @@ A research toolkit that searches the web and scholarly literature, reads sources
 - **Change direction.** Steer a running investigation, pause and resume, or revise a finished report.
 - **Take the report with you.** Export Markdown or self-contained HTML you can read offline.
 
-![Research workflow: Decompose → Research → Draft → Polish → Readability → Check.](assets/research-workflow.jpg)
+![Research workflow: Decompose → Research → Draft → Polish → Readability → Check.](https://raw.githubusercontent.com/javiermolinar/pi-turing/master/assets/research-workflow.jpg)
 
 Experimental. Reports can contain factual errors; citations and automated checks are not a guarantee of accuracy.
 
@@ -35,7 +36,21 @@ Experimental. Reports can contain factual errors; citations and automated checks
 
 Requires **Node.js 22.13+** and **[Pi](https://pi.dev) with a configured model**.
 
-Install directly from GitHub:
+Install from npm:
+
+```bash
+pi install npm:pi-turing
+```
+
+Or use the installer (requires `pi` on your PATH):
+
+```bash
+npx pi-turing
+```
+
+The installer delegates to `pi install npm:pi-turing`, so Pi manages the package and its dependencies.
+
+GitHub installation is also supported:
 
 ```bash
 pi install https://github.com/javiermolinar/pi-turing.git
@@ -48,15 +63,28 @@ Pi installs the package and its dependencies. Start Pi, or run `/reload` in an e
 Pause any active research, then run:
 
 ```bash
-pi update https://github.com/javiermolinar/pi-turing.git
+pi update npm:pi-turing
 ```
 
+For a GitHub installation, use `pi update https://github.com/javiermolinar/pi-turing.git` instead.
+
 Run `/reload` in Pi to load the update. Saved investigations remain intact.
+
+To switch from GitHub to npm, pause research, run `pi list`, and remove the Git source with `pi remove <source>` before installing from npm. Do not keep both installations enabled.
+
+### Remove
+
+```bash
+pi remove npm:pi-turing
+# Or: npx pi-turing --remove
+```
+
+Saved investigations are not deleted.
 
 <details>
 <summary>Upgrading from pi-hyperresearch</summary>
 
-No data migration is needed. `/hyperresearch` remains an alias for `/turing`; the tool is now `turing_run`. Use `.pi/turing.json` for new configuration; `.pi/hyperresearch.json` still works when the new file is absent. Storage remains at `~/.pi/hyperresearch`. `TURING_DATA_ROOT` and `TURING_CONTACT_EMAIL` take precedence over their legacy `HYPERRESEARCH_*` equivalents. If you installed from the old repository, pause research and use `pi list` to find that package, then `pi remove <old-source>` before installing from the new URL above. This avoids loading both packages; removing the package does not delete saved investigations.
+No data migration is needed. `/hyperresearch` remains an alias for `/turing`; the tool is now `turing_run`. Use `.pi/turing.json` for new configuration; `.pi/hyperresearch.json` still works when the new file is absent. Storage remains at `~/.pi/hyperresearch`. `TURING_DATA_ROOT` and `TURING_CONTACT_EMAIL` take precedence over their legacy `HYPERRESEARCH_*` equivalents. If you installed from the old repository, pause research and use `pi list` to find that package, then `pi remove <old-source>` before installing from npm or the new URL above. This avoids loading both packages; removing the package does not delete saved investigations.
 
 </details>
 
@@ -102,6 +130,22 @@ Approve the cost confirmation and let it run. Research can take **30+ minutes**.
 - **Follow and steer:** open `/turing` to watch progress, inspect sources, and guide the investigation from the box beside the report.
 - **Go deeper:** ask a follow-up in the dashboard to start a new paid investigation linked to the original. The original report stays unchanged.
 - **Come back later:** run `/turing` in Pi to browse saved investigations and export reports as Markdown or offline HTML.
+
+## Publishing to npm
+
+Publishing is manual; the GitHub release workflow does not publish to npm.
+
+```bash
+npm ci --ignore-scripts
+npm run typecheck
+npm test
+npm pack --dry-run
+npm login
+npm publish --access public
+```
+
+Check the package contents before publishing. For subsequent releases, bump the version in both `package.json` and `package-lock.json` with `npm version patch` (or `minor`/`major`). Publish prereleases with `npm publish --access public --tag next` to leave `latest` unchanged.
+
 ---
 
 [MIT License](LICENSE) · [Upstream attribution](THIRD_PARTY_NOTICES.md)

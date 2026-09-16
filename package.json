@@ -6,8 +6,18 @@
     "type": "git",
     "url": "git+https://github.com/javiermolinar/pi-turing.git"
   },
+  "homepage": "https://github.com/javiermolinar/pi-turing#readme",
+  "bugs": {
+    "url": "https://github.com/javiermolinar/pi-turing/issues"
+  },
   "type": "module",
   "license": "MIT",
+  "bin": {
+    "pi-turing": "install.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "pi-package",
     "research"
@@ -29,6 +39,7 @@
     "web",
     "skills",
     "assets",
+    "install.mjs",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"

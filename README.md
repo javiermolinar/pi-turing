@@ -28,9 +28,26 @@ A research toolkit that searches the web and scholarly literature, reads sources
 - **Change direction.** Steer a running investigation, pause and resume, or revise a finished report.
 - **Take the report with you.** Export Markdown or self-contained HTML you can read offline.
 
-![Research workflow: Decompose → Research → Draft → Polish → Readability → Check.](https://raw.githubusercontent.com/javiermolinar/pi-turing/master/assets/research-workflow.jpg)
+```text
+Decompose → Research → Draft → Review → Repair → Polish → Readability → Assess → Check
+```
 
-Experimental. Reports can contain factual errors; citations and automated checks are not a guarantee of accuracy.
+Experimental. Reports can contain factual errors; citations, model assessments and automated checks are not a guarantee of accuracy.
+
+### Review and final assessment
+
+New investigations include a substantive post-draft review, at most one bounded repair pass, and a read-only assessment of the final report. Reviewers use the original question, applied steering, approved context and collected sources—not just the research plan. They cannot run additional searches. Repair is skipped without model work when the review identifies no actionable issues.
+
+The main metrics row includes a clickable **Assessment** summary: Needs attention, Partially assessed, or No issues found, with addressed-requirement and checked-claim counts. Pending, Not assessed and Stale are explicit states. This is derived from the saved final assessment, not a numerical accuracy score; clicking opens the detailed findings.
+
+The dashboard and exports show separate judgments:
+
+- **Answer coverage:** each requirement receives 0 (missing), 1 (partial), or 2 (addressed, including a justified explanation of evidence limits). Overall coverage is Complete, Partial or Incomplete; central omissions cannot be averaged away.
+- **Constraint fit, reasoning and evidence support:** Pass, Needs attention or Not assessed, with explanations and report passages. Source support covers up to 12 selected claims, using sources fully read by that reviewer. It is not a full citation audit.
+
+Final findings remain visible; they do not start another repair loop or masquerade as factual-verification gates. Assessments are tied to the report and source versions they examined. All workers share the existing model-cost ceiling; incomplete assessment work cannot be marked complete. Optional `models.review`, `models.repair` and `models.assess` overrides use the same provider/model format as other roles.
+
+Existing saved investigations keep their original stages and spending scope. Their missing assessments display as **Not assessed**, not as passes. An explicitly approved new revision uses the new workflow.
 
 ## Install in Pi
 
@@ -56,7 +73,7 @@ GitHub installation is also supported:
 pi install https://github.com/javiermolinar/pi-turing.git
 ```
 
-Pi installs the package and its dependencies. Start Pi, or run `/reload` in an existing session when research is idle.
+Pi installs the package and its dependencies.
 
 ### Update
 
@@ -68,7 +85,7 @@ pi update npm:pi-turing
 
 For a GitHub installation, use `pi update https://github.com/javiermolinar/pi-turing.git` instead.
 
-Run `/reload` in Pi to load the update. Saved investigations remain intact.
+Saved investigations remain intact.
 
 To switch from GitHub to npm, pause research, run `pi list`, and remove the Git source with `pi remove <source>` before installing from npm. Do not keep both installations enabled.
 

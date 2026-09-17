@@ -13,7 +13,9 @@ import { ResearchServices } from "../src/services.ts";
 import { ScholarlyDiscovery } from "../src/scholarly.ts";
 import { configSchema, sourcePageSchema, type RunState } from "../src/types.ts";
 import type { WorkRequest, WorkerDriver } from "../src/worker.ts";
-import { fixture } from "./fixtures.ts";
+import { fixture, assessmentFixture } from "./fixtures.ts";
+import { assessmentIsCurrent, reportHash } from "../src/assessment.ts";
+import { legacyStepIds, stages } from "../src/types.ts";
 
 class FakeBackend implements Backend {
   calls: string[] = [];
@@ -62,6 +64,11 @@ class FakeDriver implements WorkerDriver {
       const read = request.tools.find(t => t.name === "read_source")!;
       for (const source of state.sources) await read.execute({ id: source.id }, request.signal);
       result = { markdown: "# Evidence report\n\nAwkward sentence.\n\n" + "Measured evidence. ".repeat(300) + state.sources.map(s => `[[${s.id}]]`).join(" ") };
+    }
+    if (request.role === "review" || request.role === "assess") result = assessmentFixture(state.report!);
+    if (request.role === "repair") {
+      for (const source of state.sources) await request.tools.find(tool => tool.name === "read_source")!.execute({ id: source.id }, request.signal);
+      result = { summary: "No safe changes; findings remain unresolved.", edits: [] };
     }
     if (request.role === "polish") result = { summary: "Clarity", edits: state.report?.includes("Awkward sentence.") ? [{ oldText: "Awkward sentence.", newText: "Clear sentence.", reason: "Clarity" }] : [] };
     if (request.role === "readability") result = { summary: "No additional changes", edits: [] };
@@ -168,6 +175,10 @@ test("local context stays out of public planning, distinguishes background from 
       env.driver.run = async (request, state) => {
         if (["decompose", "research"].includes(request.role)) assert.ok(!request.prompt.includes("Use our private deployment design"));
         if (request.role === "research") oldSearch = request.tools.find(tool => tool.name === "web_search");
+        if (["review", "repair", "assess"].includes(request.role)) {
+          assert.match(request.prompt, /Use our private deployment design/);
+          assert.deepEqual(request.tools.map(tool => tool.name), ["read_source"]);
+        }
         if (request.role === "draft") {
           assert.match(request.prompt, /Use our private deployment design/);
           const read = request.tools.find(tool => tool.name === "read_source")!; let offset: number | null = 0;
@@ -241,12 +252,16 @@ test("light pipeline orders stages, requires source reads, patches and verifies"
   try {
     await env.runner.run();
     assert.equal(env.runner.state.status, "done");
-    assert.deepEqual(env.driver.roles, ["decompose", "research", "research", "draft", "polish", "readability"]);
+    assert.deepEqual(env.driver.roles, ["decompose", "research", "research", "draft", "review", "polish", "readability", "assess"]);
+    assert.equal(env.runner.state.steps.repair, "done");
+    assert.equal(env.runner.state.patches.repair.edits.length, 0);
+    assert.equal(env.runner.state.review?.reportHash === env.runner.state.assessment?.reportHash, false, "Polish changed the reviewed draft");
+    assert.ok(assessmentIsCurrent(env.runner.store.load()));
     assert.ok(env.runner.state.sources.every(s => s.fullRead));
     assert.match(readFileSync(env.runner.store.reportPath, "utf8"), /Clear sentence/);
     assert.equal(existsSync(join(env.runner.store.dir, "dashboard.html")), false);
     assert.equal(env.backend.calls.at(-1), "finish");
-    assert.equal(env.runner.state.tokens, 600);
+    assert.equal(env.runner.state.tokens, 800);
     assert.equal(env.runner.state.query, "Verbatim question?");
   } finally { env.cleanup(); }
 });
@@ -407,8 +422,8 @@ test("steering waits for both research lanes, persists its queue, then replans w
     assert.equal(prompts.filter(p => p.role === "decompose").length, 2);
     assert.ok(prompts.slice(0, 3).every(p => !p.prompt.includes("Prioritize primary experimental evidence")));
     assert.ok(prompts.slice(3).every(p => p.prompt.includes("Prioritize primary experimental evidence")));
-    assert.equal(env.runner.state.tokens, 900);
-    assert.ok(Math.abs(env.runner.state.cost - 0.09) < 0.0001);
+    assert.equal(env.runner.state.tokens, 1100);
+    assert.ok(Math.abs(env.runner.state.cost - 0.11) < 0.0001);
     assert.equal(env.runner.state.query, "Verbatim question?");
   } finally { env.cleanup(); }
 });
@@ -446,6 +461,7 @@ test("late steering archives the draft and marks it stale until a new evidence-g
         assert.match(request.prompt, /Previous report for revision context only/);
         assert.match(request.prompt, /Clear sentence/);
         assert.deepEqual(state.checks, []);
+        assert.equal(state.review, undefined); assert.equal(state.assessment, undefined);
         assert.match(readFileSync(join(env.runner.store.dir, "draft-before-feedback-1.md"), "utf8"), /Clear sentence/);
       }
       return original(request, state);
@@ -518,5 +534,124 @@ test("revision preserves the parent, snapshots its context, and reruns evidence 
     const grandchild = await ResearchRunner.revise(env.cwd, child.state, "Make the conclusion shorter", configSchema.parse({}), "test/mock", "off", env.backend, env.driver);
     assert.deepEqual(grandchild.state.revision?.instructions, ["Expand the limitations"]);
     await assert.rejects(ResearchRunner.revise(env.cwd, grandchild.state, "not done", configSchema.parse({}), "test/mock", "off", env.backend, env.driver), /Only completed/);
+  } finally { env.cleanup(); }
+});
+
+test("assessments see the original query and steering, are read-only, and require fresh full source reads", async () => {
+  const env = await setup(); const original = env.driver.run.bind(env.driver);
+  try {
+    env.runner.steer("Account for fragmented traces");
+    env.driver.run = async (request, state) => {
+      if (!["review", "assess"].includes(request.role)) return original(request, state);
+      assert.match(request.prompt, /Verbatim question/);
+      assert.match(request.prompt, /Account for fragmented traces/);
+      assert.match(request.prompt, /not just the decomposition/);
+      assert.deepEqual(request.tools.map(tool => tool.name), ["read_source"]);
+      const before = state.report;
+      const result = assessmentFixture(before!);
+      result.claims = [{ passage: "Measured evidence.", sourceIds: [state.sources[0].id], verdict: "supported", rationale: "Supported by the preserved evidence." }];
+      result.evidenceSupport = { verdict: "pass", rationale: "One selected claim checked; other claims were not assessed.", passages: ["Measured evidence."] };
+      await assert.rejects(async () => request.validateResult!(result), /fully read in this assessment/);
+      await assert.rejects(request.tools[0].execute({ id: "not-collected" }, request.signal), /only read collected/);
+      await request.tools[0].execute({ id: state.sources[0].id }, request.signal);
+      await request.validateResult!(result);
+      assert.equal(state.report, before);
+      return result;
+    };
+    await env.runner.run(); assert.equal(env.runner.state.status, "done", env.runner.state.reason);
+    assert.deepEqual(env.runner.state.assessment?.sourceHashes, { "source-1": "fixed-body" });
+    assert.equal(env.runner.state.assessment?.reportHash, reportHash(env.runner.state.report!));
+  } finally { env.cleanup(); }
+});
+
+test("one bounded repair follows review; final findings remain visible without an automatic loop", async () => {
+  const env = await setup(); const original = env.driver.run.bind(env.driver); let repairs = 0; let assessments = 0;
+  try {
+    env.driver.run = async (request, state) => {
+      if (request.role === "review" || request.role === "assess") {
+        if (request.role === "assess") assessments++;
+        const result = assessmentFixture(state.report!);
+        result.requirements[0].status = "partial";
+        result.findings = [{ category: "coverage", passage: "Measured evidence.", rationale: "The central recommendation is incomplete.", suggestedFix: "Explain why evidence cannot determine the winner." }];
+        return result;
+      }
+      if (request.role === "repair") {
+        repairs++;
+        assert.deepEqual(request.tools.map(tool => tool.name), ["read_source"]);
+        await original(request, state); // Reads retained sources and records cost.
+        return { summary: "Qualified the assertion; the central recommendation remains unresolved.", edits: [{ oldText: "Awkward sentence.", newText: "Evidence cannot determine a winner.", reason: "Do not imply a proven winner." }] };
+      }
+      return original(request, state);
+    };
+    await env.runner.run(); assert.equal(env.runner.state.status, "done", env.runner.state.reason);
+    assert.equal(repairs, 1); assert.equal(assessments, 1);
+    assert.match(env.runner.state.report!, /Evidence cannot determine a winner/);
+    assert.equal(env.runner.state.assessment!.result.findings.length, 1);
+    assert.equal(env.runner.state.patches.repair.edits.length, 1);
+    assert.ok(env.runner.state.checks.every(check => check.ok), "Model concerns are not structural gate failures");
+  } finally { env.cleanup(); }
+});
+
+test("repair cannot introduce unchecked citations or rewrite the report", async () => {
+  const env = await setup(); const original = env.driver.run.bind(env.driver);
+  try {
+    env.driver.run = async (request, state) => {
+      if (request.role === "review") {
+        const result = assessmentFixture(state.report!); result.reasoning.verdict = "needs-attention"; return result;
+      }
+      if (request.role === "repair") {
+        await assert.rejects(async () => request.validateResult!({ summary: "Unsafe", edits: [{ oldText: "Awkward sentence.", newText: "Unchecked [[unknown-source]]", reason: "Test" }] }), /Read every|unknown/);
+        await assert.rejects(async () => request.validateResult!({ summary: "Unsafe", edits: [{ oldText: state.report, newText: "Replacement", reason: "Rewrite" }] }));
+      }
+      return original(request, state);
+    };
+    await env.runner.run(); assert.equal(env.runner.state.status, "done", env.runner.state.reason);
+    assert.ok(!env.runner.state.report!.includes("Unchecked"));
+  } finally { env.cleanup(); }
+});
+
+test("cost exhaustion at final assessment preserves review and never marks the run complete", async () => {
+  const env = await setup();
+  try {
+    env.runner.state.config.budgetUsd = 0.075;
+    await env.runner.run(); assert.equal(env.runner.state.status, "blocked");
+    assert.equal(env.runner.state.steps.assess, "pending");
+    assert.equal(env.runner.state.assessment, undefined); assert.ok(env.runner.state.review);
+    const state = env.runner.store.load(); applyBudgetTopUp(state, proposeBudgetTopUp(state, 1), "explicit-flag");
+    const resumed = new ResearchRunner(env.cwd, state, env.backend, env.driver);
+    await resumed.run(); assert.equal(resumed.state.status, "done", resumed.state.reason);
+    assert.equal(env.driver.roles.filter(role => role === "review").length, 1);
+    assert.equal(env.driver.roles.filter(role => role === "assess").length, 2);
+    assert.ok(assessmentIsCurrent(resumed.state));
+  } finally { env.cleanup(); }
+});
+
+test("pause after repair resumes polish and assessment without repeating review or repair", async () => {
+  const env = await setup(); const original = env.driver.run.bind(env.driver); let stopped = false;
+  try {
+    env.driver.run = async (request, state) => {
+      if (request.role === "review") { const result = assessmentFixture(state.report!); result.reasoning.verdict = "needs-attention"; return result; }
+      return original(request, state);
+    };
+    const runner = new ResearchRunner(env.cwd, env.runner.state, env.backend, env.driver, state => {
+      if (!stopped && state.steps.repair === "done") { stopped = true; runner.stop("paused"); }
+    });
+    await runner.run(); assert.equal(runner.state.status, "paused");
+    const resumed = new ResearchRunner(env.cwd, runner.store.load(), env.backend, env.driver);
+    await resumed.run(); assert.equal(resumed.state.status, "done", resumed.state.reason);
+    assert.equal(env.driver.roles.filter(role => role === "repair").length, 1);
+    assert.ok(assessmentIsCurrent(resumed.state));
+  } finally { env.cleanup(); }
+});
+
+test("old light checkpoints retain their original paid stages", async () => {
+  const env = await setup();
+  try {
+    delete env.runner.state.assessmentVersion;
+    env.runner.state.steps = Object.fromEntries(legacyStepIds.map(id => [id, "pending"]));
+    await env.runner.run(); assert.equal(env.runner.state.status, "done", env.runner.state.reason);
+    assert.deepEqual(env.driver.roles, ["decompose", "research", "research", "draft", "polish", "readability"]);
+    assert.equal(env.runner.state.review, undefined); assert.equal(env.runner.state.assessment, undefined);
+    assert.equal(env.runner.state.steps[stages.assess], undefined);
   } finally { env.cleanup(); }
 });

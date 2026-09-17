@@ -1,6 +1,18 @@
 import { configSchema, type RunState } from "../src/types.ts";
 import type { EvidenceBackend } from "../src/backend.ts";
 import { discoveryBatchSchema } from "../src/discovery-types.ts";
+import { assessmentSchema } from "../src/assessment.ts";
+
+export function assessmentFixture(report: string) {
+  const passage = report.slice(0, 100);
+  return assessmentSchema.parse({ summary: "Fixture assessment; not factual verification.",
+    requirements: [{ question: "Address the central comparison", importance: "central", status: "answered", passages: [passage], rationale: "A direct answer is present." }],
+    constraintFit: { verdict: "pass", rationale: "No supplied constraint conflicts identified.", passages: [passage] },
+    reasoning: { verdict: "pass", rationale: "No contradiction identified.", passages: [passage] },
+    evidenceSupport: { verdict: "not-assessed", rationale: "No claims checked in this fixture.", passages: [] },
+    claims: [], findings: [],
+  });
+}
 
 export function discoveryFixture(query: string) {
   return discoveryBatchSchema.parse({

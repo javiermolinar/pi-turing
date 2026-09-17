@@ -18,7 +18,7 @@ test("dashboard collapsibles have unique stable keys across shifting discovery w
   };
   const before = panels(renderMain(state));
   const keys = before.map(panel => panel.getAttribute("data-details-key"));
-  assert.equal(keys.length, 25);
+  assert.equal(keys.length, 26);
   assert.ok(keys.every(Boolean));
   assert.equal(new Set(keys).size, keys.length);
   assert.ok(before.every(panel => panel.hasAttribute("open") === panel.classList.contains("sidebar-panel")));

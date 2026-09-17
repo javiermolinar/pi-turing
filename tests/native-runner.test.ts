@@ -9,7 +9,7 @@ import { ResearchRunner } from "../src/runner.ts";
 import { createLocation } from "../src/paths.ts";
 import { configSchema } from "../src/types.ts";
 import type { WorkerDriver } from "../src/worker.ts";
-import { fixture } from "./fixtures.ts";
+import { fixture, assessmentFixture } from "./fixtures.ts";
 
 test("native light research pauses, resumes from disk, verifies and revises with no PATH executables", async () => {
   const root = mkdtempSync(join(tmpdir(), "hpr-native-runner-"));
@@ -46,6 +46,7 @@ test("native light research pauses, resumes from disk, verifies and revises with
         const result = { markdown: "# Native report\n\n## Findings\n\n" + Array.from({ length: 100 }, (_, i) => `Measured evidence supports this observed finding. [[${state.sources[i % 10].id}]]`).join("\n\n") };
         await request.validateResult?.(result); return result;
       }
+      if (request.role === "review" || request.role === "assess") return assessmentFixture(state.report!);
       return { summary: "No changes needed", edits: [] };
     },
   };

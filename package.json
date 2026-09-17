@@ -48,7 +48,7 @@
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:backend": "tsx --test tests/native-backend.test.ts tests/native-runner.test.ts tests/extraction.test.ts tests/public-http.test.ts",
-    "test:browser": "tsx scripts/preview.ts && tsx scripts/preview-inventory.ts && tsx scripts/preview-notebook.ts && tsx scripts/preview-controls.ts"
+    "test:browser": "tsx scripts/preview.ts && tsx scripts/preview-inventory.ts && tsx scripts/preview-notebook.ts && tsx scripts/preview-controls.ts && tsx scripts/preview-assessment.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

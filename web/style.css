@@ -105,6 +105,11 @@ p.query { max-width: 85ch; white-space: pre-wrap; color: var(--muted); margin: 0
 .source-cited { color: var(--muted); }
 .metrics strong { font-size: 20px; font-weight: 600; letter-spacing: -.4px; }
 .metrics strong small { display: inline; font-size: 12px; font-weight: 400; letter-spacing: 0; }
+.metrics .assessment-metric > span { flex-basis: 100%; }
+.metrics .assessment-metric strong { font-size: 16px; letter-spacing: 0; overflow-wrap: anywhere; }
+.metrics .assessment-metric strong a { color: inherit; }
+.metrics .assessment-metric[data-assessment-status="needs-attention"] strong { color: var(--bad); }
+.metrics .assessment-metric[data-assessment-status="no-issues-found"] strong { color: var(--accent); }
 .numeric { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .counter-changed { animation: counter-ink 1.4s ease-out; }
 .layout { position: relative; display: grid; grid-template-columns: var(--left-rail) minmax(0, 1fr) var(--right-rail); gap: var(--column-gap); align-items: start; }
@@ -292,6 +297,11 @@ body:not([data-connected="true"]) :is(.run-spinner, .stage-dot, .worker-state, .
   .stage-workers { max-width: 480px; }
   .report-sheet { padding-inline: 26px; }
 }
+.assessment-panel blockquote { margin: 12px 0; padding: 8px 16px; border-left: 2px solid currentColor; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.assessment-requirements > li, .assessment-judgment { margin-bottom: 20px; }
+.assessment-requirements small { display: block; }
+.assessment-panel p, .assessment-panel strong, .assessment-panel small { overflow-wrap: anywhere; }
+
 @media (max-width: 800px) {
   .metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 16px; }
   .run-header { grid-template-columns: minmax(0, 1fr); }

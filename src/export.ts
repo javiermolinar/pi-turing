@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { isReadOnlyRun, type RunState } from "./types.ts";
 import { validateContextApproval } from "./context.ts";
 import { reportSyntax, resolveSourceLink } from "./markdown-syntax.ts";
+import { answerCoverage, assessmentDisclaimer, assessmentIsCurrent, requirementRating } from "./assessment.ts";
 
 const mdText = (text: string) => text.replace(/[\x00-\x1f\x7f]/g, " ").replace(/[\\`*_[\]<>]/g, "\\$&");
 export function publicUrl(raw: string): string | undefined {
@@ -83,13 +84,26 @@ export function portableMarkdown(state: RunState): string {
   const report = render(tokens).trim();
   const stale = state.reportStale ? "STALE DRAFT" : state.status !== "done" || state.checks.some(check => !check.ok) ? "UNVERIFIED DRAFT" : `Completed ${state.profile}-pipeline report`;
   const failed = state.checks.filter(check => !check.ok).map(check => mdText(check.name));
-  const header = `> ${stale} · Run ${state.tag}\n> Verification: ${!isReadOnlyRun(state) ? "light-mode structural/quote checks only; no sentence-level claim-support audit." : "historical full/extended checks only; execution code has been removed and this version has not revalidated the report. Private review metadata is not bundled."}\n> Export is a copy, not proof of factual accuracy.${unresolved ? ` ${unresolved} unresolved/nonportable links or citations remain explicitly marked.` : ""}${failed.length ? ` Unresolved checks: ${failed.join(", ")}.` : ""}\n> No source bodies or local attachments are included. Review the report for sensitive content before sharing.\n\n`;
+  const header = `> ${stale} · Run ${state.tag}\n> Verification: ${!isReadOnlyRun(state) ? state.assessmentVersion ? "structural/quote checks plus a separate bounded model assessment; no full citation audit." : "light-mode structural/quote checks only; no sentence-level claim-support audit." : "historical full/extended checks only; execution code has been removed and this version has not revalidated the report. Private review metadata is not bundled."}\n> Export is a copy, not proof of factual accuracy.${unresolved ? ` ${unresolved} unresolved/nonportable links or citations remain explicitly marked.` : ""}${failed.length ? ` Unresolved checks: ${failed.join(", ")}.` : ""}\n> No source bodies or local attachments are included. Review the report for sensitive content before sharing.\n\n`;
   const sourceList = state.sources.map((source, index) => {
     const url = publicUrl(source.url);
     if (!url) return `- [${index + 1}] Local/nonportable evidence — not included.`;
     return `- [${index + 1}] ${link(mdText(source.title), url)}. Retrieved: ${mdText(source.retrievedAt ?? "unknown")}. ${source.fullRead ? "Full-read coverage recorded" : "Not fully read"}.${source.contentHash ? ` Content hash: ${mdText(source.contentHash)}.` : ""}${source.oa ? " Open-access substitution recorded; consult preserved evidence for the acquired version." : ""}${source.extraction ? ` Extraction: ${mdText(source.extraction.status)}; version ${mdText(source.extraction.version)}. ${mdText(source.extraction.warnings.join("; "))}.` : ""}`;
   }).join("\n");
-  return `${header}${report}\n\n## Recorded sources\n\n${sourceList || "No sources recorded."}\n`;
+  return `${header}${report}${assessmentMarkdown(state)}\n\n## Recorded sources\n\n${sourceList || "No sources recorded."}\n`;
+}
+
+function assessmentMarkdown(state: RunState): string {
+  if (isReadOnlyRun(state)) return "";
+  const assessment = state.assessment;
+  if (!assessment) return `\n\n## Final model assessment\n\nNot assessed${state.assessmentVersion ? " yet" : " — original workflow"}. ${assessmentDisclaimer}\n`;
+  const result = assessment.result;
+  const judgments = [["Constraint fit", result.constraintFit], ["Reasoning", result.reasoning], ["Evidence support (selected claims)", result.evidenceSupport]] as const;
+  return `\n\n## Final model assessment\n\n${assessmentIsCurrent(state) ? "" : "STALE — the report, sources or instructions changed.\n\n"}${assessmentDisclaimer}\n\nAnswer coverage: **${answerCoverage(result)}**.\n\n${mdText(result.summary)}\n\n` +
+    result.requirements.map(item => `- **${requirementRating(item.status)}/2 — ${mdText(item.question)}** (${item.importance}; ${item.status}). ${mdText(item.rationale)}`).join("\n") + "\n\n" +
+    judgments.map(([label, item]) => `- **${label}: ${item.verdict}**. ${mdText(item.rationale)}`).join("\n") +
+    (result.findings.length ? "\n\n### Remaining findings\n\n" + result.findings.map(item => `- **${item.category}**: ${mdText(item.rationale)} Suggested correction: ${mdText(item.suggestedFix)}`).join("\n") : "") +
+    `\n\nSource-support checks: ${result.claims.length} selected claims.\n` + result.claims.map(item => `- **${item.verdict}**: ${mdText(item.passage)} — ${mdText(item.rationale)} Sources: ${item.sourceIds.map(id => { const source = state.sources.find(source => source.id === id); return source && publicUrl(source.url) ? mdText(source.title) : "Local/nonportable evidence — not included"; }).join("; ")}.`).join("\n") + "\n";
 }
 
 export interface SaveTarget { path: string; protectedRoot: string; existingHash?: string }

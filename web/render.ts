@@ -2,7 +2,9 @@ import { renderReport, reportSourceIds } from "../src/report.ts";
 import { activityAge } from "../src/progress.ts";
 import { feedbackSummary } from "../src/feedback.ts";
 import type { FeedbackControl } from "../src/dashboard-controls.ts";
-import { stepIds as lightSteps, stepNames, stages, isReadOnlyRun, type StepId, type RunState, type Worker } from "../src/types.ts";
+import { scheduledSteps, stepNames, stages, isReadOnlyRun, type StepId, type RunState, type Worker } from "../src/types.ts";
+import { renderAssessments } from "./assessment.ts";
+import { answerCoverage, assessmentIsCurrent, assessmentMetric } from "../src/assessment.ts";
 
 export const escapeHtml = (value: unknown): string => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 const e = escapeHtml;
@@ -11,7 +13,7 @@ const duration = (ms: number) => `${Math.floor(ms / 60_000)}m ${Math.floor(ms / 
 const badge = (status: string) => `<span class="badge ${e(status)}">${e(status)}</span>`;
 const stageMessages: Partial<Record<StepId, string>> = {
   "1": "Framing the question.", "2": "Following sources. Checking the gaps.",
-  "10": "Turning the evidence into a draft.", "15": "Tightening the argument.", "16": "Giving the report a final read.",
+  "10": "Turning the evidence into a draft.", review: "Checking answers, constraints and evidence.", repair: "Applying bounded corrections.", "15": "Tightening the prose.", "16": "Giving the report a final read.", assess: "Assessing the final report without changing it.",
 };
 function workerCards(state: RunState, workers: Worker[], running: boolean): string {
   return workers.map(worker => {
@@ -103,10 +105,10 @@ function feedbackComposer(state: RunState, control: FeedbackControl): string {
 }
 
 /** This HTML is generated only by the host. No source or model HTML is trusted. */
-export function renderMain(state: RunState, runnerLive = false, revisions?: RevisionLinks, control?: FeedbackControl): string {
+export function renderMain(state: RunState, runnerLive = false, revisions?: RevisionLinks, control?: FeedbackControl, assessmentCurrent?: boolean): string {
   const archived = isReadOnlyRun(state);
   if (archived) runnerLive = false;
-  const stepIds: readonly string[] = archived ? Object.keys(state.steps) : lightSteps;
+  const stepIds: readonly string[] = archived ? Object.keys(state.steps) : scheduledSteps(state);
   const stageName = (id: string) => archived ? id : stepNames[id as StepId];
   const active = stepIds.find(id => state.steps[id] === "running");
   const read = state.sources.filter(s => s.fullRead).length;
@@ -116,6 +118,8 @@ export function renderMain(state: RunState, runnerLive = false, revisions?: Revi
   const running = runnerLive && state.status === "running";
   const statusLabel = { running: running ? "In progress" : "Recorded running — not live", done: "Complete", paused: "Paused", aborted: "Cancelled", failed: "Failed", blocked: "Blocked" }[state.status];
   const statusIcon = { running: "○", done: "✓", paused: "Ⅱ", aborted: "×", failed: "!", blocked: "!" }[state.status];
+  const metric = assessmentMetric(state, assessmentCurrent);
+  const assessmentLabel = state.assessment ? (assessmentCurrent ?? assessmentIsCurrent(state)) ? `Answer coverage: ${answerCoverage(state.assessment.result)}` : "Stale assessment" : undefined;
   return `<div class="run-overview"><header class="run-header"><div class="eyebrow">Research notebook / ${e(state.profile)}${state.report ? `<a class="report-jump" href="#report-preview">Read report ↓</a>` : ""}</div><h1>${e(state.decomposition?.title ?? state.query)}</h1>
     <div class="run-status-row" data-run-live="${running}"><span class="run-state ${e(state.status)}"><span aria-hidden="true" class="${running ? "run-spinner is-active" : "status-icon"}">${running ? "" : statusIcon}</span><strong>${e(statusLabel)}</strong></span>${running && active ? `<span class="status-stage">${e(stageName(active))}</span>` : ""}<span class="stage-completion">${stepIds.filter(id => state.steps[id] === "done").length} of ${stepIds.length} stages complete</span></div>
     <p class="query">${e(state.query)}</p>
@@ -127,6 +131,7 @@ export function renderMain(state: RunState, runnerLive = false, revisions?: Revi
     <div><span><a href="#run-details" data-open-details="run-details">Model cost</a></span><strong class="numeric"${state.pricingKnown ? ` data-counter="cost" data-value="${state.cost}"` : ""}>${state.pricingKnown ? "~" + money(state.cost) : "Unknown"}</strong></div>
     <div><span>Tokens</span><strong class="numeric" data-counter="tokens" data-value="${state.tokens}">${state.tokens.toLocaleString("en-US")}</strong></div>
     <div><span>Run time</span><strong class="numeric">${duration(state.elapsedMs)}</strong></div>
+    <div class="assessment-metric" data-assessment-status="${metric.status}"><span>Assessment</span><strong title="Model judgment, not factual verification">${archived ? e(metric.label) : `<a href="#final-assessment" data-open-details="final-assessment" aria-label="Assessment: ${e(metric.label)}. Open details">${e(metric.label)}</a>`}</strong>${metric.detail ? `<small>${e(metric.detail)}</small>` : ""}</div>
   </section></div>
   <div class="layout">
   <aside class="pipeline sidebar" aria-label="Pipeline"><details class="sidebar-panel" data-details-key="pipeline-panel" open><summary>Pipeline</summary><div class="sidebar-body"><p class="sidebar-meta">${stepIds.length} stages · ${running ? `${state.workers.filter(w => w.status === "running").length} active workers` : `${state.workers.length} recorded workers`}</p>
@@ -135,7 +140,8 @@ export function renderMain(state: RunState, runnerLive = false, revisions?: Revi
     <details class="card" data-details-key="pipeline-notes" id="run-details"><summary>Run details</summary><p class="footnote">Model: ${e(state.model)}. ${state.config.budgetUsd === null ? "No model-cost ceiling." : `Cost ceiling: ~${money(state.config.budgetUsd)}.`} Model usage updates after turns; search fees are excluded. Run time counts active execution.</p>${archived ? '<p class="footnote">Historical stage records; execution is unavailable.</p>' : ""}<p class="footnote">Worker bars use the entire run’s reported model spend. Activity shows turn counts and the latest update, not full transcripts.</p></details>
   </div></details></aside>
   <div class="content">
-    <section class="card report-sheet" id="report-preview"><div class="section-header"><h2>Report</h2><span><a class="report-status" href="#verification" data-open-details="verification">${reportStatus}</a></span></div>${state.checks.some(check => !check.ok) ? `<p class="report-warning" role="status">Failed checks: ${state.checks.filter(check => !check.ok).map(check => e(check.name)).join(", ")}. <a href="#verification" data-open-details="verification">Review verification details</a>.</p>` : ""}${state.report ? `<article class="report">${renderReport(state.report, state.sources)}</article>` : `<div class="report-placeholder"><h3>The report will appear here</h3><p>${running ? "Research is in progress. Inspect stages in the pipeline while the first draft is prepared." : "No draft has been saved. Recorded progress is available in the pipeline."}</p></div>`}</section>
+    <section class="card report-sheet" id="report-preview"><div class="section-header"><h2>Report</h2><span><a class="report-status" href="#verification" data-open-details="verification">${reportStatus}</a></span></div>${state.checks.some(check => !check.ok) ? `<p class="report-warning" role="status">Failed checks: ${state.checks.filter(check => !check.ok).map(check => e(check.name)).join(", ")}. <a href="#verification" data-open-details="verification">Review verification details</a>.</p>` : ""}${assessmentLabel && !archived ? `<p class="footnote"><a href="#final-assessment" data-open-details="final-assessment">${e(assessmentLabel)} · View separate quality judgments</a>. Model assessment, not factual verification.</p>` : ""}${state.report ? `<article class="report">${renderReport(state.report, state.sources)}</article>` : `<div class="report-placeholder"><h3>The report will appear here</h3><p>${running ? "Research is in progress. Inspect stages in the pipeline while the first draft is prepared." : "No draft has been saved. Recorded progress is available in the pipeline."}</p></div>`}</section>
+    ${archived ? "" : renderAssessments(state, e, assessmentCurrent)}
     ${state.discoveries?.length ? `<details class="card supporting-panel" data-details-key="scholarly-discovery"><summary>Scholarly discovery <span>${state.discoveries.length} queries · ${state.discoveries.flatMap(batch => batch.coverage).filter(provider => provider.status === "failed").length} failed provider calls</span></summary><p class="footnote">Metadata and abstracts are leads, never full-read evidence or independent corroboration. Complete provenance and coverage are retained in the checkpoint. Showing the latest five queries.</p>${state.discoveries.slice(-5).map((batch, index) => `<details data-details-key="discovery-${Math.max(0, state.discoveries!.length - 5) + index}"><summary>${e(batch.query)}</summary><ul>${batch.coverage.map(provider => `<li>${e(provider.provider)} ${badge(provider.status)} · ${provider.count} records${provider.cached ? " · cached" : ""}${provider.skipped ? ` · ${provider.skipped} skipped` : ""}${provider.error ? ` · ${e(provider.error)}` : ""}</li>`).join("")}</ul>${batch.results.length ? `<ul class="discovery-results">${batch.results.map(work => `<li>${sourceLink(work.url, work.title)} <small>${e(work.workType)} · ${e(work.version)} version${work.retracted ? " · Retracted" : ""}</small></li>`).join("")}</ul>` : `<p class="empty">No discovery results returned.</p>`}${batch.uncertainMatches.length ? `<p>${batch.uncertainMatches.length} uncertain/shared-identity matches; do not count them as independent sources.</p>` : ""}</details>`).join("")}</details>` : ""}
     <details class="card supporting-panel" data-details-key="sources" id="source-details"><summary>Sources <span>${cited.size} cited · ${read} read · ${state.sources.length} collected</span></summary><p class="footnote">Cited counts distinct saved sources referenced by citations or resolved Markdown links in this report, including local/private evidence. Repeated references count once.</p>
       <div class="table-wrap"><table id="sources"><thead><tr><th>Source</th><th>Retrieved</th><th>Words</th><th>Read</th></tr></thead><tbody>${state.sources.map((s, index) => `<tr><td>[${index + 1}] ${sourceLink(s.url, s.title)}${cited.has(s.id) ? '<small class="source-cited">Cited in report</small>' : ""}${s.origin === "local" ? "<small>Local evidence — not independent external corroboration</small>" : s.integration ? `<small>Scoped document · ${e(s.integration.bindingId)} · ${e(s.integration.version ?? "version unknown")} · ${e(s.integration.visibility)}</small>` : ""}<small>${e(s.url)}</small>${s.oa ? `<small class="oa">Open-access copy · see source note for version/provenance</small>` : ""}${s.extraction ? `<details data-details-key="source-${e(s.id)}-extraction"><summary>${e(s.extraction.reader)} · ${e(s.extraction.status)}</summary><small>Acquired: ${e(s.extraction.actualUrl)} · version ${e(s.extraction.version)}${s.extraction.pages !== undefined ? ` · ${s.extraction.textPages ?? "unknown"}/${s.extraction.pages} pages with text` : ""}</small><small>${e(s.extraction.warnings.join("; "))}</small></details>` : ""}</td><td>${e(s.retrievedAt?.slice(0, 10) ?? "unknown")}</td><td>${s.words.toLocaleString("en-US")}</td><td>${badge(s.fullRead ? "done" : "pending")}</td></tr>`).join("")}</tbody></table></div>

@@ -6,7 +6,7 @@ import {
 import { Type, type TSchema } from "typebox";
 import type { z } from "zod";
 import { z as Zod } from "zod";
-import { message, type Role, type RunState } from "./types.ts";
+import { message, roles, stages, scheduledSteps, type Role, type RunState } from "./types.ts";
 
 export interface WorkerTool {
   name: string; description: string; parameters: TSchema;
@@ -50,7 +50,7 @@ export class PiWorkerDriver implements WorkerDriver {
   }
   async checkModels(state: RunState): Promise<boolean> {
     let priced = true;
-    for (const role of ["decompose", "research", "draft", "polish", "readability"] as const) {
+    for (const role of roles.filter(role => scheduledSteps(state).includes(stages[role]))) {
       const model = this.model(state, role);
       const auth = await this.runtime.getAuth(model, { signal: AbortSignal.timeout(30_000) });
       if (!auth) throw new Error(`Authentication missing for ${model.provider}/${model.id}`);

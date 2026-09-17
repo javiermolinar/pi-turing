@@ -5,7 +5,7 @@ description: Run Turing's light research pipeline with private working state and
 
 # Turing for Pi
 
-Research for the questions behind your code. This experimental adaptation runs light research only: decomposition, parallel research, one draft, bounded polish/readability and structural/quote checks. It does not perform semantic citation verification or establish upstream parity.
+Research for the questions behind your code. This experimental adaptation runs light research only: decomposition, parallel research, one draft, substantive review, at most one bounded repair pass, polish/readability, a read-only final assessment, and structural/quote checks. Model assessments cover answer coverage, constraint fit, reasoning and selected claim support—not full citation verification or proof of factual accuracy. They do not establish upstream parity.
 
 - Startup is quiet: no automatic saved-run loading, widget or run-context injection. Explicitly browse, start, resume or inspect a run to use it.
 - Start with `/turing <question>` or call `turing_run` with the user's verbatim query. Only start paid research when explicitly requested. Cost confirmation remains; optional files/readers need separate disclosure approval.
@@ -19,7 +19,8 @@ Research for the questions behind your code. This experimental adaptation runs l
 - `/turing steer <feedback>` queues a replan at a stage boundary. All stages restart; spend and source caps remain. Applied means included in instructions, not verified fulfillment.
 - `/turing revise <tag> <feedback>` creates a new light investigation from a completed light report, with a fresh cost ceiling and preserved parent. It is not a cheap patch-only edit.
 - Full/extended execution code has been removed. Old runs remain viewable/exportable but cannot resume, receive top-ups or steering, or be revised. Never relabel their checkpoints as light.
-- A failed or blocked run is not complete. Structural and quote checks do not prove factual accuracy. Report limitations honestly.
+- A failed or blocked run is not complete. Structural/quote checks and model assessment grades do not prove factual accuracy. Report limitations honestly. Review and final assessment use collected sources and approved context only; no additional searches or automatic repair loops. Final findings remain visible even when structural checks pass.
+- Existing saved light runs retain their original stages and costs; absent assessment means not assessed. New runs and explicitly approved revisions include review, one optional repair worker and final assessment under the same cost ceiling. Source-support judgments cover only the listed claims, not the entire report.
 - Register (`plain`, `technical`, `academic`) and depth (`concise`, `standard`, `deep`) guide presentation, not extra pipelines. Configuration accepts only `scope: "light"`; the field can be omitted.
 - The default ~$15 model ceiling is not a completion estimate or guarantee. Search fees are separate; in-flight calls may overshoot. Exhausted light resumes offer an approved top-up; `resume [tag] --add-budget <USD>` explicitly increases the saved ceiling. Never reset spend, automatically repeat top-ups, or recommend more spending without inspecting the remaining work. Do not combine the flag with `--use-project-config`.
 - Web search uses the explicitly selected `searchProvider`: `duckduckgo` (default), `brave`, `tavily`, `serply`, or `kagi`. DuckDuckGo is free/keyless but can be rate-limited or blocked by bot challenges. All other providers need their own environment key. Never silently switch providers or enable paid extraction/answer features. Saved runs retain their provider; search fees are separate from model spend.

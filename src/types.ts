@@ -7,13 +7,17 @@ import { searchProviderSchema } from "./search.ts";
 import { discoveryBatchSchema, scholarlyProviderSchema } from "./discovery-types.ts";
 import { budgetAdjustmentSchema } from "./budget.ts";
 import { revisionSpendingRecordSchema } from "./revision-approval.ts";
+import { assessmentRecordSchema } from "./assessment.ts";
 
 // Stable persisted IDs; execution uses names rather than upstream step numbers.
-export const stages = { decompose: "1", research: "2", draft: "10", polish: "15", readability: "16" } as const;
-export const stepIds = [stages.decompose, stages.research, stages.draft, stages.polish, stages.readability] as const;
+export const stages = { decompose: "1", research: "2", draft: "10", review: "review", repair: "repair", polish: "15", readability: "16", assess: "assess" } as const;
+export const legacyStepIds = [stages.decompose, stages.research, stages.draft, stages.polish, stages.readability] as const;
+export const stepIds = [stages.decompose, stages.research, stages.draft, stages.review, stages.repair, stages.polish, stages.readability, stages.assess] as const;
+// Never silently add paid stages to an existing checkpoint.
+export function scheduledSteps(state: { assessmentVersion?: 1 }): readonly StepId[] { return state.assessmentVersion === 1 ? stepIds : legacyStepIds; }
 export type StepId = typeof stepIds[number];
 export const stepNames: Record<StepId, string> = {
-  "1": "Decompose", "2": "Width sweep", "10": "Draft", "15": "Polish", "16": "Readability",
+  "1": "Decompose", "2": "Width sweep", "10": "Draft", review: "Substantive review", repair: "Bounded repair", "15": "Polish", "16": "Readability", assess: "Final assessment",
 };
 // Historical profiles are parsed only for read-only report access.
 const savedScopeSchema = z.enum(["light", "full", "extended"]);
@@ -22,7 +26,7 @@ export const patchSchema = z.object({
   edits: z.array(z.object({ oldText: z.string().min(1).max(800), newText: z.string().max(800), reason: z.string().min(1).max(500) }).strict()).max(8),
 }).strict();
 export type Patch = z.infer<typeof patchSchema>;
-export const roles = ["decompose", "research", "draft", "polish", "readability"] as const;
+export const roles = ["decompose", "research", "draft", "review", "repair", "polish", "readability", "assess"] as const;
 export type Role = typeof roles[number];
 export const thinkingSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const configSchema = z.object({
@@ -135,6 +139,9 @@ export const stateSchema = z.object({
   decomposition: decompositionSchema.optional(),
   research: z.array(researchSchema).default([]),
   report: z.string().max(200_000).optional(),
+  assessmentVersion: z.literal(1).optional(),
+  review: assessmentRecordSchema.optional(),
+  assessment: assessmentRecordSchema.optional(),
   patches: z.record(z.string(), patchSchema),
   checks: z.array(checkSchema),
 });

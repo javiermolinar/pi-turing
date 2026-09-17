@@ -187,7 +187,8 @@ test("compact status shares the title header and metrics retain usage caveats", 
     assert.equal(document.querySelector(".status-icon")!.textContent, icon);
     assert.equal(document.querySelector(".status-icon")!.getAttribute("aria-hidden"), "true");
     assert.equal(document.querySelectorAll(".live-progress, [data-activity-at], .run-actions").length, 0);
-    assert.equal(document.querySelectorAll(".metrics > div").length, 4);
+    assert.equal(document.querySelectorAll(".metrics > div").length, 5);
+    assert.match(document.querySelector('.assessment-metric')!.textContent!, /Not assessed/);
     assert.match(document.querySelector('.metrics')!.textContent!, /Run time/);
     assert.doesNotMatch(document.querySelector('.metrics')!.textContent!, /Active run time|Usage updates|ceiling|excludes/);
     assert.match(document.querySelector('#run-details')!.textContent!, /Cost ceiling: ~\$15.00/);
